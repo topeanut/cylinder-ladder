@@ -1,0 +1,244 @@
+@import 'tailwindcss';
+
+/* Tailwind v4의 dark: 변형을 시스템 설정이 아닌 .dark 클래스에 연결한다.
+   덕분에 사용자가 토글로 테마를 강제할 수 있다. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans:
+    'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont,
+    system-ui, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+
+  --animate-pop-in: pop-in 0.42s cubic-bezier(0.22, 1.2, 0.36, 1) both;
+  --animate-rise-in: rise-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.82);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+html {
+  color-scheme: light;
+  -webkit-text-size-adjust: 100%;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  min-height: 100svh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* 원기둥을 좌우로 끌 때 모바일에서 페이지가 같이 당겨지지 않도록 */
+  overscroll-behavior-y: none;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   원기둥 사다리
+   3D 배치(rotateY/translateZ)는 바깥 래퍼가 담당하고,
+   여기 있는 클래스들은 안쪽 요소의 모양과 애니메이션만 맡는다.
+   덕분에 애니메이션이 3D 배치 transform을 덮어쓰지 않는다.
+   ═══════════════════════════════════════════════════════════ */
+
+/* 원기둥 뒤에 깔리는 은은한 광원. 3D 형태가 배경에서 떠 보이게 한다. */
+.ladder-glow {
+  background: radial-gradient(
+    closest-side,
+    rgb(245 158 11 / 0.16),
+    rgb(245 158 11 / 0.05) 55%,
+    transparent 78%
+  );
+}
+
+.ladder-rail {
+  width: 3px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgb(115 115 115 / 0.9) 6%,
+    rgb(64 64 64 / 0.95) 50%,
+    rgb(115 115 115 / 0.9) 94%,
+    transparent
+  );
+}
+
+html.dark .ladder-rail {
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgb(115 115 115 / 0.55) 6%,
+    rgb(212 212 212 / 0.85) 50%,
+    rgb(115 115 115 / 0.55) 94%,
+    transparent
+  );
+  box-shadow: 0 0 6px rgb(255 255 255 / 0.12);
+}
+
+/* 가로선은 위쪽 모서리를 밝게 해 원통형 금속봉처럼 보이게 한다. */
+.ladder-rung {
+  background: linear-gradient(
+    to bottom,
+    rgb(255 255 255 / 0.55),
+    rgb(87 83 78 / 0.95) 45%,
+    rgb(41 37 36 / 0.9)
+  );
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+}
+
+html.dark .ladder-rung {
+  background: linear-gradient(
+    to bottom,
+    rgb(255 255 255 / 0.85),
+    rgb(168 162 158 / 0.95) 45%,
+    rgb(87 83 78 / 0.9)
+  );
+  box-shadow: 0 0 8px rgb(255 255 255 / 0.16);
+}
+
+/* 사방에서 날아와 제자리에 꽂힌다. 도착 지점은 transform: none —
+   실제 3D 위치는 바깥 래퍼가 이미 잡아 두었기 때문이다. */
+.ladder-rung.is-flying {
+  animation: rung-fly-in 0.62s cubic-bezier(0.16, 1.02, 0.3, 1) both;
+}
+
+@keyframes rung-fly-in {
+  from {
+    opacity: 0;
+    transform: translate3d(var(--fx), var(--fy), var(--fz)) rotate(var(--frot)) scaleX(0.4);
+  }
+  70% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 지나간 길 — 위에서 아래로, 그리고 옆으로 자라난다 */
+.trail-down {
+  animation: trail-grow-y var(--trail-duration) linear var(--trail-delay) both;
+}
+
+.trail-across {
+  animation: trail-grow-x var(--trail-duration) linear var(--trail-delay) both;
+}
+
+/* 공유 링크로 바로 들어온 경우: 애니메이션 없이 최종 상태 */
+.trail-static {
+  opacity: 1;
+}
+
+@keyframes trail-grow-y {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes trail-grow-x {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.ladder-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border-width: 1px;
+  border-style: solid;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #171717;
+  background: rgb(255 255 255 / 0.92);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.14);
+  /* 뒷면으로 돌아간 이름표는 뒤집혀 읽히므로 숨긴다 */
+  backface-visibility: hidden;
+  transition: opacity 0.25s ease;
+  cursor: pointer;
+}
+
+html.dark .ladder-label {
+  color: #fafafa;
+  background: rgb(23 23 23 / 0.92);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.5);
+}
+
+.ladder-prize {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: #737373;
+  background: rgb(229 229 229 / 0.9);
+  backface-visibility: hidden;
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease;
+}
+
+html.dark .ladder-prize {
+  color: #a3a3a3;
+  background: rgb(38 38 38 / 0.9);
+}
+
+.ladder-prize.is-win {
+  color: #451a03;
+  background: #f59e0b;
+  box-shadow: 0 0 16px rgb(245 158 11 / 0.55);
+}
+
+.ladder-prize.is-lose {
+  color: #a3a3a3;
+  background: rgb(229 229 229 / 0.7);
+}
+
+html.dark .ladder-prize.is-lose {
+  color: #737373;
+  background: rgb(38 38 38 / 0.7);
+}
+
+/* 접근성: 모션 최소화 설정을 켠 사용자에게는 연출을 즉시 끝낸다. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
