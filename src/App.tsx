@@ -133,7 +133,7 @@ export default function App() {
   )
 
   return (
-    <div className="flex min-h-svh flex-col bg-neutral-100 text-neutral-900 lg:h-svh lg:flex-row lg:overflow-hidden dark:bg-neutral-950 dark:text-neutral-50">
+    <div className="flex min-h-svh flex-col bg-neutral-100 text-neutral-900 min-[900px]:h-svh min-[900px]:flex-row min-[900px]:overflow-hidden dark:bg-neutral-950 dark:text-neutral-50">
       <Sidebar
         theme={theme}
         muted={muted}
@@ -172,7 +172,7 @@ export default function App() {
         />
       </Sidebar>
 
-      <main className="relative min-h-[60svh] flex-1 lg:h-svh">
+      <main className="relative min-h-[60svh] flex-1 min-[900px]:h-svh">
         {app.people.length === 0 ? (
           <p className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-neutral-500 dark:text-neutral-400">
             왼쪽에서 이름을 2명 이상 추가하면

@@ -24,7 +24,7 @@ export function Sidebar({
   children,
 }: SidebarProps) {
   return (
-    <aside className="flex w-full shrink-0 flex-col border-neutral-200 bg-neutral-100/95 lg:h-svh lg:w-[368px] lg:border-r dark:border-neutral-800 dark:bg-neutral-950/95">
+    <aside className="flex w-full shrink-0 flex-col border-neutral-200 bg-neutral-100/95 min-[900px]:h-svh min-[900px]:w-[368px] min-[900px]:border-r dark:border-neutral-800 dark:bg-neutral-950/95">
       <header className="flex items-start justify-between gap-3 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
         <div className="min-w-0">
           <h1 className="text-base font-extrabold tracking-tight">
@@ -53,7 +53,7 @@ export function Sidebar({
         </div>
       </header>
 
-      <div className="flex flex-col gap-4 overflow-y-auto p-4 lg:min-h-0 lg:flex-1">
+      <div className="flex flex-col gap-4 overflow-y-auto p-4 min-[900px]:min-h-0 min-[900px]:flex-1">
         {children}
       </div>
     </aside>
