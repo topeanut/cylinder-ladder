@@ -1,8 +1,9 @@
-import { Suspense, useEffect, useMemo, useRef } from 'react'
-import { Canvas } from '@react-three/fiber'
+import { Suspense, useMemo, useRef } from 'react'
+import { Canvas, useFrame } from '@react-three/fiber'
 import { Environment, Lightformer, MeshReflectorMaterial, OrbitControls } from '@react-three/drei'
 import { Bloom, EffectComposer, Vignette } from '@react-three/postprocessing'
 import { CYLINDER_HEIGHT } from '../lib/geometry'
+import { CinematicCamera } from './CinematicCamera'
 import { LadderRig, type LadderRigProps } from './LadderRig'
 
 /**
@@ -29,16 +30,6 @@ export function LadderScene({
 }: LadderSceneProps) {
   // 다크 전용이다. 발광·반사·블룸이 전부 어두운 배경을 전제로 맞춰져 있다.
   const background = '#08080b'
-
-  const onPlayEndRef = useRef(onPlayEnd)
-  onPlayEndRef.current = onPlayEnd
-
-  // 재생 종료는 씬 밖에서 시간으로 판단한다. 3D 내부 상태에 의존하지 않아 단순하다.
-  useEffect(() => {
-    if (!running) return
-    const timer = window.setTimeout(() => onPlayEndRef.current(), playDurationMs + 220)
-    return () => window.clearTimeout(timer)
-  }, [running, playDurationMs])
 
   const floorY = useMemo(() => -CYLINDER_HEIGHT / 2 - 1.1, [])
 
@@ -83,6 +74,16 @@ export function LadderScene({
 
         <LadderRig {...rig} />
 
+        {/* 재생이 실제로 끝났는지는 그린 프레임을 세어 판단한다 */}
+        <PlayClock active={running} durationMs={playDurationMs} onEnd={onPlayEnd} />
+
+        {/* 재생 중에는 카메라가 선두를 따라 내려간다 */}
+        <CinematicCamera
+          active={running}
+          lanes={rig.lanes}
+          activeIndex={rig.activeIndex}
+        />
+
         {/* 바닥 반사 — 원기둥이 공중에 떠 있지 않고 어딘가에 서 있게 만든다 */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, floorY, 0]}>
           <planeGeometry args={[60, 60]} />
@@ -126,4 +127,44 @@ export function LadderScene({
       </EffectComposer>
     </Canvas>
   )
+}
+
+/**
+ * 재생이 끝나는 시점을 알린다.
+ *
+ * setTimeout으로 재면 안 된다. 백그라운드 탭에서는 rAF가 멈춰 그림은 그대로인데
+ * 타이머만 흘러서, 돌아왔을 때 "이미 끝났다"고 통보받는다. 프레임 델타를 쌓으면
+ * 화면이 실제로 다 그려진 뒤에만 끝난다.
+ */
+function PlayClock({
+  active,
+  durationMs,
+  onEnd,
+}: {
+  active: boolean
+  durationMs: number
+  onEnd: () => void
+}) {
+  const elapsedRef = useRef(0)
+  const firedRef = useRef(false)
+  const onEndRef = useRef(onEnd)
+  onEndRef.current = onEnd
+
+  useFrame((_, delta) => {
+    if (!active) {
+      elapsedRef.current = 0
+      firedRef.current = false
+      return
+    }
+    if (firedRef.current) return
+
+    elapsedRef.current += delta * 1000
+    // 마지막 한 조각이 그려질 여유를 조금 준다.
+    if (elapsedRef.current >= durationMs + 220) {
+      firedRef.current = true
+      onEndRef.current()
+    }
+  })
+
+  return null
 }

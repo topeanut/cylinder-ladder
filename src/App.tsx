@@ -21,10 +21,19 @@ export default function App() {
   const [playToken, setPlayToken] = useState(0)
   const [activeIndex, setActiveIndex] = useState<number | null>(null)
   /**
+   * 이번 화면에서 결과가 공개된 사람들(명단 순번).
+   *
+   * URL에 담지 않는다. 봉인 링크를 받은 사람이 "내가 어디까지 열어 봤는지"는
+   * 각자의 화면 사정이지, 공유해야 할 상태가 아니기 때문이다.
+   */
+  const [revealedPeople, setRevealedPeople] = useState<Set<number>>(new Set())
+
+  /**
    * 공유 링크로 막 들어온 경우에는 애니메이션 없이 최종 상태를 보여 준다.
    * 한 번이라도 직접 재생하면(playToken > 0) 그 뒤로는 애니메이션을 쓴다.
    */
   const arrivedRevealed = useRef(app.revealed)
+  const instant = arrivedRevealed.current && playToken === 0
 
   const phase: Phase = running
     ? 'running'
@@ -34,29 +43,41 @@ export default function App() {
         ? 'done'
         : 'ready'
 
-  const instant = arrivedRevealed.current && playToken === 0
+  /* ── 3D에 넘길 계산 ───────────────────────────────────────── */
 
-  /* ── 재생 시간 ────────────────────────────────────────────── */
+  const geo = useMemo(
+    () => computeGeometry(app.people.length, app.plan?.ladder.rows ?? 0),
+    [app.people.length, app.plan],
+  )
 
-  // 3D 씬과 같은 계산을 써야 소리·색종이가 그림과 어긋나지 않는다.
-  const playDurationMs = useMemo(() => {
-    if (!app.plan) return 0
-    const geo = computeGeometry(app.people.length, app.plan.ladder.rows)
-    const lanes = buildLanes(app.plan, geo)
-    return totalPlayMs(
-      activeIndex === null ? lanes : lanes.filter((l) => l.personIndex === activeIndex),
-    )
-  }, [activeIndex, app.people.length, app.plan])
+  const lanes = useMemo(() => (app.plan ? buildLanes(app.plan, geo) : []), [app.plan, geo])
+
+  const playDurationMs = useMemo(
+    () =>
+      totalPlayMs(
+        activeIndex === null ? lanes : lanes.filter((l) => l.personIndex === activeIndex),
+      ),
+    [activeIndex, lanes],
+  )
+
+  /** 결과가 공개된 사람들. 전체 공개 상태면 전원이다. */
+  const revealedAll = useMemo(
+    () =>
+      app.revealed
+        ? new Set(app.people.map((_, index) => index))
+        : revealedPeople,
+    [app.revealed, app.people, revealedPeople],
+  )
 
   /* ── 가로선이 꽂히는 소리 ─────────────────────────────────── */
 
   useEffect(() => {
     if (!app.plan || instant) return
 
-    const timers = app.plan.ladder.rungs.flatMap((gaps, row) =>
-      gaps.map((_, orderInRow) =>
+    const timers = app.plan.ladder.rungs.flatMap((rungs, row) =>
+      rungs.map((_, orderInRow) =>
         window.setTimeout(
-          () => playClack((((row * 7 + orderInRow * 3) % 10) / 10)),
+          () => playClack(((row * 7 + orderInRow * 3) % 10) / 10),
           rungDelayMs(row, orderInRow) + 60,
         ),
       ),
@@ -79,6 +100,7 @@ export default function App() {
     arrivedRevealed.current = false
     setActiveIndex(null)
     setPlayToken(0)
+    setRevealedPeople(new Set())
     app.rollLadder()
   }, [app])
 
@@ -92,9 +114,21 @@ export default function App() {
 
   const handlePlayEnd = useCallback(() => {
     setRunning(false)
-    // 개별 재생일 때는 이미 공개된 상태이므로 축하 연출을 반복하지 않는다.
-    if (activeIndex !== null) return
+    if (!app.plan) return
+
+    // 한 사람만 탄 경우: 그 사람의 결과만 열고, 당첨일 때만 축하한다.
+    if (activeIndex !== null) {
+      setRevealedPeople((prev) => new Set(prev).add(activeIndex))
+      if (app.plan.prizeSlots[app.plan.traces[activeIndex].end]) {
+        playWin()
+        fireConfetti()
+      }
+      return
+    }
+
     app.reveal()
+    // 이번 판의 당첨자를 이력에 남긴다. 다음 판부터 그만큼 덜 뽑힌다.
+    app.recordWins(app.plan.winners.map((index) => app.people[index]?.name).filter(Boolean))
     playWin()
     fireConfetti()
   }, [activeIndex, app, fireConfetti, playWin])
@@ -102,72 +136,85 @@ export default function App() {
   const handleReset = useCallback(() => {
     setActiveIndex(null)
     setPlayToken(0)
+    setRevealedPeople(new Set())
     arrivedRevealed.current = false
     app.resetLadder()
   }, [app])
 
-  /** 결과가 공개된 뒤 한 사람의 경로만 다시 타 본다. */
+  /** 한 사람의 경로만 타 본다. 봉인 상태라면 이때 그 사람의 결과가 열린다. */
   const handleSelectPerson = useCallback(
     (index: number) => {
-      if (!app.revealed || running) return
+      if (app.seed === null || running) return
+
       const next = activeIndex === index ? null : index
       setActiveIndex(next)
       setPlayToken((token) => token + 1)
       arrivedRevealed.current = false
       if (next !== null) setRunning(true)
     },
-    [activeIndex, app.revealed, running],
+    [activeIndex, app.seed, running],
   )
 
-  const shareUrl = useMemo(
-    () =>
-      buildShareUrl({
-        people: app.people,
-        winCount: app.winCount,
-        seed: app.seed,
-        revealed: true,
-      }),
-    [app.people, app.winCount, app.seed],
+  // 공유에 실릴 값만 추려 둔다. app 객체 전체를 의존성에 걸면 매 렌더 새로 만들어진다.
+  const shareable = useMemo(
+    () => ({
+      people: app.people,
+      winCount: app.winCount,
+      seed: app.seed,
+      wins: app.wins,
+      revealed: false,
+    }),
+    [app.people, app.winCount, app.seed, app.wins],
   )
+
+  const shareUrl = useMemo(() => buildShareUrl(shareable, true), [shareable])
+  const sealedUrl = useMemo(() => buildShareUrl(shareable, false), [shareable])
 
   return (
-    <div className="flex min-h-svh flex-col bg-neutral-100 text-neutral-900 min-[900px]:h-svh min-[900px]:flex-row min-[900px]:overflow-hidden dark:bg-neutral-950 dark:text-neutral-50">
+    <div className="flex min-h-svh flex-col bg-neutral-950 text-neutral-50 min-[900px]:h-svh min-[900px]:flex-row min-[900px]:overflow-hidden">
       <Sidebar muted={muted} onToggleMuted={toggleMuted}>
         <Controls
           phase={phase}
           peopleCount={app.people.length}
           winCount={app.winCount}
           shareUrl={shareUrl}
+          sealedUrl={sealedUrl}
           onWinCountChange={app.setWinCount}
           onRoll={handleRoll}
           onPlay={handlePlay}
           onReset={handleReset}
         />
 
-        {app.revealed && (
-          <ResultBoard
-            people={app.people}
-            plan={app.plan}
-            activeIndex={activeIndex}
-            onSelect={handleSelectPerson}
-          />
-        )}
+        <ResultBoard
+          people={app.people}
+          plan={app.plan}
+          revealedPeople={revealedAll}
+          probabilities={app.probabilities}
+          wins={app.wins}
+          activeIndex={activeIndex}
+          disabled={running}
+          onSelect={handleSelectPerson}
+          onClearWins={app.clearWins}
+        />
 
         <PeopleEditor
           people={app.people}
           winnerIds={app.revealed ? app.winnerIds : new Set<string>()}
+          probabilities={app.probabilities}
+          wins={app.wins}
           disabled={running}
           onAdd={app.addPeople}
           onRename={app.renamePerson}
           onRemove={app.removePerson}
           onReorder={app.reorderPeople}
           onClear={app.clearPeople}
+          onWinsChange={app.setWinsFor}
         />
       </Sidebar>
 
       <main className="relative min-h-[60svh] flex-1 min-[900px]:h-svh">
         {app.people.length === 0 ? (
-          <p className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-neutral-500 dark:text-neutral-400">
+          <p className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-neutral-400">
             왼쪽에서 이름을 2명 이상 추가하면
             <br />
             원기둥 사다리가 세워집니다.
@@ -179,7 +226,8 @@ export default function App() {
             onPlayEnd={handlePlayEnd}
             people={app.people}
             plan={app.plan}
-            revealed={app.revealed}
+            geo={geo}
+            lanes={lanes}
             buildToken={app.seed ?? 0}
             playToken={playToken}
             activeIndex={activeIndex}
@@ -188,7 +236,7 @@ export default function App() {
           />
         )}
 
-        <p className="pointer-events-none absolute inset-x-0 bottom-3 text-center text-xs text-neutral-500 dark:text-neutral-400">
+        <p className="pointer-events-none absolute inset-x-0 bottom-3 text-center text-xs text-neutral-400">
           {phase === 'edit'
             ? '왼쪽에서 사다리를 만들어 보세요'
             : '끌어서 돌리고, 휠로 확대·축소할 수 있습니다'}

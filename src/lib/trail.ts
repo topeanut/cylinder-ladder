@@ -1,7 +1,6 @@
 import { Vector3 } from 'three'
 import type { LadderPlan } from './ladder'
 import type { LadderGeometry } from './geometry'
-import { mod } from './utils'
 
 /** 경로가 그려지는 속도(월드 단위/초). */
 const TRAVEL_SPEED = 2.2
@@ -39,10 +38,8 @@ export function buildLanes(plan: LadderPlan, geo: LadderGeometry): Lane[] {
         points.push(pointOn(segment.rail, geo.rowY(segment.fromRow)))
         points.push(pointOn(segment.rail, geo.rowY(segment.toRow)))
       } else {
-        // 오른쪽으로 건너가면 gap+1번 줄, 왼쪽으로 건너가면 gap번 줄에 도착한다.
-        const destination =
-          segment.direction === 1 ? mod(segment.gap + 1, geo.count) : segment.gap
-        points.push(pointOn(destination, geo.rowY(segment.row)))
+        // 이웃으로 건너가든 원통을 관통하든, 도착한 줄의 같은 높이로 직선을 그으면 된다.
+        points.push(pointOn(segment.to, geo.rowY(segment.row)))
       }
     }
 

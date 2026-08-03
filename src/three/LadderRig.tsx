@@ -1,4 +1,5 @@
-import { memo, useEffect, useMemo, useRef } from 'react'
+import { Fragment, memo, useEffect, useMemo, useRef } from 'react'
+import type { ReactNode } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Html } from '@react-three/drei'
 import {
@@ -10,11 +11,12 @@ import {
   TubeGeometry,
   Vector3,
   type Mesh,
+  type MeshBasicMaterial,
 } from 'three'
 import type { LadderPlan } from '../lib/ladder'
 import type { Person } from '../lib/types'
-import { CYLINDER_HEIGHT, computeGeometry, personColor, rungDelayMs } from '../lib/geometry'
-import { buildLanes } from '../lib/trail'
+import { CYLINDER_HEIGHT, personColor, rungDelayMs, type LadderGeometry } from '../lib/geometry'
+import type { Lane } from '../lib/trail'
 import { clamp, cn, mod } from '../lib/utils'
 
 const RUNG_FLY_MS = 620
@@ -33,10 +35,15 @@ function easeOutCubic(t: number): number {
 export interface LadderRigProps {
   people: Person[]
   plan: LadderPlan | null
-  revealed: boolean
+  geo: LadderGeometry
+  lanes: Lane[]
+  /** 사다리를 다시 짤 때마다 바뀌는 값. 가로선이 날아드는 연출을 다시 튼다. */
   buildToken: number
+  /** 경로 애니메이션을 다시 트는 토큰. 값이 바뀔 때마다 처음부터 재생된다. */
   playToken: number
+  /** null이면 전원, 숫자면 그 사람만 그린다. */
   activeIndex: number | null
+  /** 애니메이션 없이 최종 상태로 그린다(공유 링크로 바로 들어온 경우). */
   instant: boolean
   onSelectPerson: (index: number) => void
 }
@@ -44,7 +51,8 @@ export interface LadderRigProps {
 function LadderRigImpl({
   people,
   plan,
-  revealed,
+  geo,
+  lanes,
   buildToken,
   playToken,
   activeIndex,
@@ -52,8 +60,6 @@ function LadderRigImpl({
   onSelectPerson,
 }: LadderRigProps) {
   const count = people.length
-  const rows = plan?.ladder.rows ?? 0
-  const geo = useMemo(() => computeGeometry(count, rows), [count, rows])
   const top = CYLINDER_HEIGHT / 2
 
   /**
@@ -61,8 +67,6 @@ function LadderRigImpl({
    * 미리 그려 두면 아직 타지도 않았는데 결과가 새어 나간다.
    */
   const showTrails = instant || playToken > 0
-
-  const lanes = useMemo(() => (plan ? buildLanes(plan, geo) : []), [geo, plan])
 
   if (count === 0) return null
 
@@ -77,37 +81,50 @@ function LadderRigImpl({
       ))}
 
       {/* 가로선 — 사다리를 새로 짤 때마다 사방에서 날아와 꽂힌다 */}
-      {plan &&
-        plan.ladder.rungs.flatMap((gaps, row) =>
-          gaps.map((gap, orderInRow) => (
-            <Rung
-              key={`${buildToken}-${row}-${gap}`}
-              from={geo.railPoint(gap, geo.rowY(row))}
-              to={geo.railPoint(mod(gap + 1, geo.count), geo.rowY(row))}
-              delayMs={instant ? 0 : rungDelayMs(row, orderInRow)}
-              instant={instant}
-              seed={row * 31 + gap * 17}
-            />
-          )),
-        )}
+      {plan && (
+        <Fragment key={`rungs-${buildToken}-${plan.ladder.rows}`}>
+          {plan.ladder.rungs.flatMap((rungs, row) =>
+            rungs.map((rung, orderInRow) => {
+              const [a, b] =
+                rung.kind === 'edge'
+                  ? [rung.gap, mod(rung.gap + 1, count)]
+                  : [rung.from, rung.to]
+
+              return (
+                <Rung
+                  key={`${row}-${a}-${b}`}
+                  from={geo.railPoint(a, geo.rowY(row))}
+                  to={geo.railPoint(b, geo.rowY(row))}
+                  through={rung.kind === 'through'}
+                  delayMs={instant ? 0 : rungDelayMs(row, orderInRow)}
+                  instant={instant}
+                  seed={row * 31 + a * 17 + b * 7}
+                />
+              )
+            }),
+          )}
+        </Fragment>
+      )}
 
       {/* 지나간 길 */}
-      {plan &&
-        showTrails &&
-        lanes
-          .filter((lane) => activeIndex === null || lane.personIndex === activeIndex)
-          .map((lane) => (
-            <Trail
-              key={`${playToken}-${activeIndex ?? 'all'}-${lane.personIndex}`}
-              points={lane.points}
-              color={personColor(lane.personIndex)}
-              delayMs={activeIndex === null ? lane.delayMs : 0}
-              durationMs={lane.durationMs}
-              instant={instant}
-              // 한 사람만 볼 때는 굵게 그려 또렷하게 보이도록 한다.
-              thick={activeIndex !== null}
-            />
-          ))}
+      {plan && showTrails && (
+        <Fragment key={`trail-${playToken}-${activeIndex ?? 'all'}`}>
+          {lanes
+            .filter((lane) => activeIndex === null || lane.personIndex === activeIndex)
+            .map((lane) => (
+              <Trail
+                key={lane.personIndex}
+                points={lane.points}
+                color={personColor(lane.personIndex)}
+                delayMs={activeIndex === null ? lane.delayMs : 0}
+                durationMs={lane.durationMs}
+                instant={instant}
+                // 한 사람만 볼 때는 굵게 그려 또렷하게 보이도록 한다.
+                thick={activeIndex !== null}
+              />
+            ))}
+        </Fragment>
+      )}
 
       {/* 이름표 */}
       {people.map((person, index) => (
@@ -132,28 +149,64 @@ function LadderRigImpl({
         </FacingLabel>
       ))}
 
-      {/* 결과표 */}
+      {/*
+        결과 칸은 처음부터 전부 보인다.
+        실제 사다리타기도 아래 결과는 다 보인 채로 시작한다. 긴장감은 "저기 뭐가
+        있나"가 아니라 "내가 저기로 가나"에서 나온다. 그래서 당첨 칸은 감추는 대신
+        멀리서도 보이게 빛낸다.
+      */}
       {plan &&
         plan.prizeSlots.map((isWin, index) => (
-          <FacingLabel
-            key={index}
-            azimuth={geo.azimuth(index)}
-            position={geo.railPoint(index, -top - 0.5)}
-          >
-            <div
-              className={cn(
-                'flex min-w-[3.5rem] items-center justify-center rounded-xl px-3 py-1.5',
-                'text-[13px] font-extrabold whitespace-nowrap backdrop-blur transition-colors',
-                !revealed && 'bg-neutral-800/80 text-neutral-400',
-                revealed && isWin && 'bg-amber-500 text-neutral-950 shadow-[0_0_22px_rgba(245,158,11,0.75)]',
-                revealed && !isWin && 'bg-neutral-800/80 text-neutral-500',
-              )}
+          <Fragment key={index}>
+            {isWin && <PrizeBeacon position={geo.railPoint(index, -top - 0.12)} />}
+            <FacingLabel
+              azimuth={geo.azimuth(index)}
+              position={geo.railPoint(index, -top - 0.62)}
             >
-              {revealed ? (isWin ? '당첨' : '꽝') : '?'}
-            </div>
-          </FacingLabel>
+              <div
+                className={cn(
+                  'flex min-w-[3.5rem] items-center justify-center rounded-xl px-3 py-1.5',
+                  'text-[13px] font-extrabold whitespace-nowrap backdrop-blur',
+                  isWin
+                    ? 'bg-amber-400 text-neutral-950 shadow-[0_0_28px_rgba(251,191,36,0.9)]'
+                    : 'bg-neutral-800/70 text-neutral-500',
+                )}
+              >
+                {isWin ? '당첨' : '꽝'}
+              </div>
+            </FacingLabel>
+          </Fragment>
         ))}
     </group>
+  )
+}
+
+/* ── 당첨 칸 표식 ───────────────────────────────────────────── */
+
+/**
+ * 당첨 칸 바닥에서 천천히 맥동하는 발광 고리.
+ *
+ * 라벨만으로는 원기둥 뒤쪽 당첨 칸을 알 수 없다. 고리는 3D 물체라 원기둥을
+ * 돌리지 않아도 "저쪽 어딘가에 당첨이 있다"는 감각을 준다. 블룸이 이 발광을
+ * 받아 번지면서 멀리서도 눈에 띈다.
+ */
+function PrizeBeacon({ position }: { position: Vector3 }) {
+  const ref = useRef<Mesh>(null)
+
+  useFrame(() => {
+    const mesh = ref.current
+    if (!mesh) return
+    // 1.6초 주기로 부드럽게 밝아졌다 어두워진다.
+    const pulse = 0.5 + 0.5 * Math.sin((performance.now() / 1600) * Math.PI * 2)
+    mesh.scale.setScalar(1 + pulse * 0.18)
+    ;(mesh.material as MeshBasicMaterial).opacity = 0.55 + pulse * 0.45
+  })
+
+  return (
+    <mesh ref={ref} position={position} rotation={[Math.PI / 2, 0, 0]}>
+      <torusGeometry args={[0.17, 0.035, 10, 28]} />
+      <meshBasicMaterial color="#fbbf24" transparent toneMapped={false} />
+    </mesh>
   )
 }
 
@@ -162,12 +215,15 @@ function LadderRigImpl({
 function Rung({
   from,
   to,
+  through,
   delayMs,
   instant,
   seed,
 }: {
   from: Vector3
   to: Vector3
+  /** 원통 속을 관통하는 선인지. 겉면 가로선과 다르게 칠해 눈에 띄게 한다. */
+  through: boolean
   delayMs: number
   instant: boolean
   seed: number
@@ -202,17 +258,21 @@ function Rung({
     }
   }, [seed, target.middle.y])
 
-  // 0을 "아직 시작 안 함"으로 쓰면 안 된다. clock.elapsedTime의 첫 프레임 값이 0이라
-  // 시작 시각이 영원히 갱신되지 않고 애니메이션이 멈춘다.
-  const startedAt = useRef<number | null>(null)
+  /**
+   * 시간을 벽시계가 아니라 **프레임 델타로 누적**한다.
+   *
+   * 브라우저는 백그라운드 탭에서 rAF를 멈추지만 벽시계는 계속 간다. 벽시계로 재면
+   * 탭을 옮겼다 돌아왔을 때 연출이 통째로 건너뛴다. 델타를 쌓으면 화면이 멈춘 동안
+   * 시간도 멈춰서, 돌아왔을 때 보던 자리부터 이어진다.
+   */
+  const elapsedRef = useRef(0)
 
-  useFrame(({ clock }) => {
+  useFrame((_, delta) => {
     const mesh = ref.current
     if (!mesh) return
-    if (startedAt.current === null) startedAt.current = clock.elapsedTime
 
-    const elapsed = (clock.elapsedTime - startedAt.current) * 1000
-    const t = instant ? 1 : clamp((elapsed - delayMs) / RUNG_FLY_MS, 0, 1)
+    elapsedRef.current += delta * 1000
+    const t = instant ? 1 : clamp((elapsedRef.current - delayMs) / RUNG_FLY_MS, 0, 1)
     const eased = easeOutCubic(t)
 
     mesh.position.lerpVectors(launch.position, target.middle, eased)
@@ -223,8 +283,20 @@ function Rung({
 
   return (
     <mesh ref={ref} visible={false}>
-      <cylinderGeometry args={[0.032, 0.032, target.length, 12]} />
-      <meshStandardMaterial color="#e8eaee" metalness={0.95} roughness={0.18} />
+      <cylinderGeometry args={[through ? 0.026 : 0.032, through ? 0.026 : 0.032, target.length, 12]} />
+      {through ? (
+        // 관통선은 스스로 빛나게 해서 "이건 특별한 선"임을 알린다.
+        <meshStandardMaterial
+          color="#fbbf24"
+          emissive="#f59e0b"
+          emissiveIntensity={1.6}
+          metalness={0.6}
+          roughness={0.3}
+          toneMapped={false}
+        />
+      ) : (
+        <meshStandardMaterial color="#e8eaee" metalness={0.95} roughness={0.18} />
+      )}
     </mesh>
   )
 }
@@ -236,7 +308,7 @@ function Rung({
  *
  * TubeGeometry의 uv.x는 튜브 길이를 따라 0→1로 흐른다. 그 값을 진행률과 비교해
  *   - 아직 지나지 않은 구간은 버리고(discard)
- *   - 머리 쪽은 흰색으로 타오르게, 꼬리는 어둡게
+ *   - 머리 쪽은 흰색으로 타오르게, 꼬리는 조금 어둡게
  * 칠한다. 인덱스를 잘라 그리는 방식보다 경계가 깨끗하고, 무엇보다 "지금 여기를
  * 지나고 있다"가 한눈에 보인다.
  */
@@ -324,13 +396,12 @@ function Trail({
   }, [geometry, material])
 
   const headRef = useRef<Mesh>(null)
-  const startedAt = useRef<number | null>(null)
+  // 가로선과 같은 이유로 프레임 델타를 누적한다. (위 Rung 주석 참고)
+  const elapsedRef = useRef(0)
 
-  useFrame(({ clock }) => {
-    if (startedAt.current === null) startedAt.current = clock.elapsedTime
-
-    const elapsed = (clock.elapsedTime - startedAt.current) * 1000
-    const t = instant ? 1 : clamp((elapsed - delayMs) / Math.max(durationMs, 1), 0, 1)
+  useFrame((_, delta) => {
+    elapsedRef.current += delta * 1000
+    const t = instant ? 1 : clamp((elapsedRef.current - delayMs) / Math.max(durationMs, 1), 0, 1)
     material.uniforms.uProgress.value = t
 
     // 선두의 발광 구슬. 다 내려가면 치운다.
@@ -368,7 +439,7 @@ function FacingLabel({
 }: {
   azimuth: number
   position: Vector3
-  children: React.ReactNode
+  children: ReactNode
 }) {
   const divRef = useRef<HTMLDivElement>(null)
   const normal = useMemo(

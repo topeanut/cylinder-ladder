@@ -32,6 +32,8 @@ function isAppState(value: unknown): value is AppState {
     Array.isArray(candidate.people) &&
     typeof candidate.winCount === 'number' &&
     typeof candidate.revealed === 'boolean' &&
+    typeof candidate.wins === 'object' &&
+    candidate.wins !== null &&
     (candidate.seed === null || typeof candidate.seed === 'number') &&
     candidate.people.every(
       (p: unknown) =>

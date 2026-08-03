@@ -18,6 +18,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { GripVertical, Trash2, UserPlus, X } from 'lucide-react'
 import type { Person } from '../lib/types'
+import { formatPercent } from '../lib/probability'
 import { Button, Panel } from './ui'
 import { cn } from '../lib/utils'
 
@@ -25,23 +26,31 @@ interface PeopleEditorProps {
   people: Person[]
   /** 결과가 공개된 뒤 당첨자에게 표시를 남긴다. */
   winnerIds: Set<string>
+  /** 사람별 이번 판 당첨 확률(0~1). 명단과 같은 순서다. */
+  probabilities: number[]
+  /** 이름 → 지금까지의 당첨 횟수. */
+  wins: Record<string, number>
   disabled: boolean
   onAdd: (raw: string) => void
   onRename: (id: string, name: string) => void
   onRemove: (id: string) => void
   onReorder: (from: number, to: number) => void
   onClear: () => void
+  onWinsChange: (name: string, times: number) => void
 }
 
 function PeopleEditorImpl({
   people,
   winnerIds,
+  probabilities,
+  wins,
   disabled,
   onAdd,
   onRename,
   onRemove,
   onReorder,
   onClear,
+  onWinsChange,
 }: PeopleEditorProps) {
   const [draft, setDraft] = useState('')
 
@@ -142,9 +151,12 @@ function PeopleEditorImpl({
                   person={person}
                   order={index + 1}
                   won={winnerIds.has(person.id)}
+                  probability={probabilities[index] ?? 0}
+                  wins={wins[person.name] ?? 0}
                   disabled={disabled}
                   onRename={onRename}
                   onRemove={onRemove}
+                  onWinsChange={onWinsChange}
                 />
               ))}
             </ul>
@@ -159,18 +171,24 @@ interface SortableRowProps {
   person: Person
   order: number
   won: boolean
+  probability: number
+  wins: number
   disabled: boolean
   onRename: (id: string, name: string) => void
   onRemove: (id: string) => void
+  onWinsChange: (name: string, times: number) => void
 }
 
 function SortableRow({
   person,
   order,
   won,
+  probability,
+  wins,
   disabled,
   onRename,
   onRemove,
+  onWinsChange,
 }: SortableRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: person.id, disabled })
@@ -233,6 +251,33 @@ function SortableRow({
           won && 'font-bold text-amber-600 dark:text-amber-400',
         )}
       />
+
+      {/* 당첨 횟수 — 손으로 고칠 수 있다. 지난 회식 기록을 바로 반영하기 위해서다. */}
+      <label
+        className="flex shrink-0 items-center gap-0.5 rounded-lg bg-neutral-900/70 px-1 py-0.5"
+        title="지금까지의 당첨 횟수. 많을수록 다음 판에서 뽑힐 확률이 낮아집니다."
+      >
+        <span aria-hidden className="text-xs text-amber-500/80">
+          ★
+        </span>
+        <input
+          type="number"
+          min={0}
+          max={99}
+          value={wins}
+          disabled={disabled}
+          aria-label={`${person.name} 당첨 횟수`}
+          onChange={(e) => onWinsChange(person.name, Number(e.target.value))}
+          className="w-7 bg-transparent text-center text-xs text-neutral-200 tabular-nums focus:outline-none disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        />
+      </label>
+
+      <span
+        className="w-11 shrink-0 text-right text-xs text-neutral-400 tabular-nums"
+        title="이번 판에서 당첨될 확률"
+      >
+        {formatPercent(probability)}
+      </span>
 
       <button
         type="button"
