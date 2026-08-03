@@ -14,7 +14,6 @@ import { LadderRig, type LadderRigProps } from './LadderRig'
  */
 
 interface LadderSceneProps extends LadderRigProps {
-  dark: boolean
   /** 애니메이션이 도는 동안에는 자동 회전을 멈춰 눈이 따라가기 쉽게 한다. */
   running: boolean
   onPlayEnd: () => void
@@ -23,13 +22,13 @@ interface LadderSceneProps extends LadderRigProps {
 }
 
 export function LadderScene({
-  dark,
   running,
   onPlayEnd,
   playDurationMs,
   ...rig
 }: LadderSceneProps) {
-  const background = dark ? '#08080b' : '#e9e7e4'
+  // 다크 전용이다. 발광·반사·블룸이 전부 어두운 배경을 전제로 맞춰져 있다.
+  const background = '#08080b'
 
   const onPlayEndRef = useRef(onPlayEnd)
   onPlayEndRef.current = onPlayEnd
@@ -46,13 +45,13 @@ export function LadderScene({
   return (
     <Canvas
       dpr={[1, 2]}
-      camera={{ position: [0, 1.6, 12.5], fov: 42 }}
+      camera={{ position: [0, 1.2, 11.2], fov: 44 }}
       gl={{ antialias: true }}
     >
       <color attach="background" args={[background]} />
       <fog attach="fog" args={[background, 16, 34]} />
 
-      <ambientLight intensity={dark ? 0.5 : 1.1} />
+      <ambientLight intensity={0.5} />
       <directionalLight position={[6, 9, 7]} intensity={1.4} />
       <pointLight position={[-7, 3, -5]} intensity={45} color="#4f8dff" />
       <pointLight position={[7, -2, 5]} intensity={32} color="#ffab2e" />
@@ -90,13 +89,13 @@ export function LadderScene({
           <MeshReflectorMaterial
             resolution={1024}
             mixBlur={1}
-            mixStrength={dark ? 42 : 14}
+            mixStrength={42}
             blur={[320, 110]}
             mirror={0.55}
             depthScale={1.1}
             minDepthThreshold={0.4}
             maxDepthThreshold={1.35}
-            color={dark ? '#0c0c10' : '#d6d3d0'}
+            color="#0c0c10"
             metalness={0.65}
             roughness={0.92}
           />
@@ -106,8 +105,8 @@ export function LadderScene({
       <OrbitControls
         makeDefault
         enablePan={false}
-        minDistance={7}
-        maxDistance={20}
+        minDistance={5.5}
+        maxDistance={18}
         minPolarAngle={Math.PI * 0.18}
         maxPolarAngle={Math.PI * 0.72}
         autoRotate={!rig.instant && !running}
@@ -119,11 +118,11 @@ export function LadderScene({
       <EffectComposer>
         <Bloom
           mipmapBlur
-          intensity={dark ? 1.5 : 0.7}
-          luminanceThreshold={0.62}
-          luminanceSmoothing={0.25}
+          intensity={1.15}
+          luminanceThreshold={0.7}
+          luminanceSmoothing={0.2}
         />
-        <Vignette offset={0.28} darkness={dark ? 0.72 : 0.35} />
+        <Vignette offset={0.28} darkness={0.72} />
       </EffectComposer>
     </Canvas>
   )

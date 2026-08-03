@@ -40,5 +40,3 @@ export interface AppState {
   /** 결과가 공개된 상태인지. 공유 링크는 이 값을 true로 담는다. */
   revealed: boolean
 }
-
-export type Theme = 'light' | 'dark'

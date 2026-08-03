@@ -6,7 +6,6 @@ import type { AppState } from './types'
  */
 
 const STATE_KEY = 'hoesik-picker:state:v1'
-export const THEME_KEY = 'hoesik-picker:theme'
 export const MUTED_KEY = 'hoesik-picker:muted'
 
 export function readRaw(key: string): string | null {

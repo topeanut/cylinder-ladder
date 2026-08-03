@@ -1,5 +1,6 @@
 <!doctype html>
-<html lang="ko">
+<!-- 이 앱은 다크 모드 전용이다. 3D 씬의 발광·반사가 어두운 배경을 전제로 조정돼 있다. -->
+<html lang="ko" class="dark">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -10,18 +11,6 @@
       content="회식에서 사람을 랜덤으로 뽑는 3D 원기둥 룰렛. 서버 없이 동작하고 URL만 공유하면 상태가 그대로 복원됩니다."
     />
     <title>전능 회식 메뉴 3D 원기둥형 스레드</title>
-    <script>
-      // 첫 페인트 전에 테마를 확정해 다크모드 깜빡임(FOUC)을 막는다.
-      try {
-        var saved = localStorage.getItem('hoesik-picker:theme')
-        var dark = saved
-          ? saved === 'dark'
-          : window.matchMedia('(prefers-color-scheme: dark)').matches
-        document.documentElement.classList.toggle('dark', dark)
-      } catch (e) {
-        /* 프라이빗 모드 등에서 localStorage 접근 실패 — 시스템 기본값 유지 */
-      }
-    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -6,7 +6,6 @@ import { Sidebar } from './components/Sidebar'
 import { useAppState } from './hooks/useAppState'
 import { useConfetti } from './hooks/useConfetti'
 import { useSound } from './hooks/useSound'
-import { useTheme } from './hooks/useTheme'
 import { computeGeometry, rungDelayMs } from './lib/geometry'
 import { buildShareUrl } from './lib/query'
 import { buildLanes, totalPlayMs } from './lib/trail'
@@ -15,7 +14,6 @@ import { LadderScene } from './three/LadderScene'
 
 export default function App() {
   const app = useAppState()
-  const { theme, toggleTheme } = useTheme()
   const { muted, toggleMuted, playClack, playWin, startBgm, stopBgm } = useSound()
   const fireConfetti = useConfetti()
 
@@ -134,12 +132,7 @@ export default function App() {
 
   return (
     <div className="flex min-h-svh flex-col bg-neutral-100 text-neutral-900 min-[900px]:h-svh min-[900px]:flex-row min-[900px]:overflow-hidden dark:bg-neutral-950 dark:text-neutral-50">
-      <Sidebar
-        theme={theme}
-        muted={muted}
-        onToggleTheme={toggleTheme}
-        onToggleMuted={toggleMuted}
-      >
+      <Sidebar muted={muted} onToggleMuted={toggleMuted}>
         <Controls
           phase={phase}
           peopleCount={app.people.length}
@@ -151,7 +144,7 @@ export default function App() {
           onReset={handleReset}
         />
 
-        {phase === 'done' && (
+        {app.revealed && (
           <ResultBoard
             people={app.people}
             plan={app.plan}
@@ -181,7 +174,6 @@ export default function App() {
           </p>
         ) : (
           <LadderScene
-            dark={theme === 'dark'}
             running={running}
             playDurationMs={playDurationMs}
             onPlayEnd={handlePlayEnd}

@@ -1,7 +1,9 @@
 # 전능 회식 메뉴 3D 원기둥형 스레드
 
-원기둥을 감은 3D 사다리타기. 이름을 넣고 사다리를 만들면 가로선이 사방에서 날아와 꽂히고,
-사다리를 타면 각자의 경로가 원기둥 표면을 따라 흘러내립니다. 결과는 링크 하나로 그대로 공유됩니다.
+원기둥을 감은 3D 사다리타기. WebGL로 그립니다.
+
+사다리를 만들면 가로선이 사방에서 날아와 꽂히고, 사다리를 타면 각자의 경로가 원기둥 표면을
+따라 빛나며 흘러내립니다. 결과는 링크 하나로 그대로 공유됩니다.
 
 서버가 없습니다. 모든 상태는 URL과 localStorage에만 존재합니다.
 
@@ -13,7 +15,7 @@ npm run dev
 ## 무엇이 다른가
 
 평면 사다리와 달리 세로줄이 원통 둘레에 배치되므로 **마지막 줄과 첫 줄도 이웃**입니다.
-평면에서는 양 끝 사람이 한쪽으로만 이동할 수 있지만, 원기둥에서는 모두가 양쪽으로 움직일 수 있습니다.
+평면에서는 양 끝 사람이 한쪽으로만 이동할 수 있지만, 원기둥에서는 모두가 양쪽으로 움직입니다.
 그래도 결과는 여전히 완전한 1:1 대응(순열)이라 게임으로서 성립합니다.
 
 ## 상태 공유
@@ -36,51 +38,75 @@ URL이 곧 저장소입니다.
 
 URL에 파라미터가 있으면 URL이 이깁니다. 없으면 localStorage에서 마지막 상태를 복원합니다.
 
+## 기술 스택
+
+React 19 · TypeScript · Vite · Tailwind v4 ·
+three.js / @react-three/fiber / drei / postprocessing · @dnd-kit · lucide-react
+
 ## 구조
 
 ```
 src/
   lib/
     ladder.ts      시드 난수 · 사다리 생성 · 경로 추적
-    geometry.ts    원기둥 치수 계산 (반지름, 현의 길이와 깊이)
+    geometry.ts    원기둥 월드 좌표 (반지름, 현의 길이, 행 높이)
+    trail.ts       경로를 3D 점열로 · 재생 시간 계산
     query.ts       QueryString ↔ 상태
     storage.ts     localStorage 접근
     utils.ts       이름 정규화, 배열 조작
   hooks/
     useAppState.ts 명단 · 당첨 수 · 시드, URL/localStorage 동기화
-    useCylinder.ts 원기둥 회전 (드래그 · 관성 · 빌보딩)
-    useSound.ts    Web Audio로 합성하는 효과음
+    useSound.ts    Web Audio 합성 효과음 + 사다리 BGM
     useConfetti.ts 당첨 연출
-    useTheme.ts    다크 모드
+  three/
+    LadderScene.tsx  Canvas · 조명 · 환경맵 · 바닥 반사 · 블룸 · 카메라
+    LadderRig.tsx    세로줄 · 가로선 · 트레일 · 이름표
   components/
-    LadderCylinder.tsx  3D 사다리 본체
-    PeopleEditor.tsx    명단 편집 · 드래그 정렬
-    ResultBoard.tsx     전체 결과표
-    Controls.tsx        당첨 인원 · 사다리 만들기 · 타기 · 공유
-    ui.tsx              Button · Toggle · Panel
+    Sidebar.tsx      좌측 내비게이션(LNB)
+    Controls.tsx     당첨 인원 · 사다리 만들기 · 타기 · 공유
+    ResultBoard.tsx  전체 결과표
+    PeopleEditor.tsx 명단 편집 · 드래그 정렬
+    ui.tsx           Button · Toggle · Panel
 ```
 
-### 성능
+### 트레일은 왜 셰이더인가
 
-회전각을 React state에 두면 초당 60번 리렌더가 일어납니다. 인원이 늘수록 세로줄·가로선·경로가
-함께 늘어나 곧바로 버벅입니다. 그래서 회전각은 `useRef`에만 두고 `requestAnimationFrame` 안에서
-DOM의 `transform`을 직접 씁니다. 회전 중 리렌더는 **0회**입니다.
+`TubeGeometry`의 `uv.x`는 튜브 길이를 따라 0→1로 흐릅니다. 이 값을 진행률과 비교해
+아직 지나지 않은 구간은 버리고(`discard`), 머리 쪽은 희게 타오르고 꼬리는 어두워지도록
+칠합니다. 인덱스를 잘라 그리는 방식보다 경계가 깨끗하고, "지금 여기를 지나고 있다"가
+한눈에 보입니다. 지오메트리를 매 프레임 다시 만들지 않아 사람이 많아도 부담이 없습니다.
 
-이름표는 원기둥에 붙어 돌면 원근에 눌려 글자가 뭉개지므로, 위치만 원기둥에 두고 방향은 카메라
-쪽으로 되돌립니다(빌보딩). 이 계산도 같은 rAF 루프에서 처리합니다.
+코너는 곡선으로 잇지 않습니다. 사다리의 세로줄과 가로선은 실제로 직선이고, 곡선으로
+뭉개면 굵은 지렁이처럼 보입니다. 직선만 이어 붙여 직각을 살리면 회로 기판의 배선처럼
+읽힙니다.
+
+### 환경맵에 네트워크가 없다
+
+drei의 `Environment` 프리셋은 CDN에서 HDRI를 내려받습니다. 대신 `Lightformer` 몇 장으로
+환경맵을 직접 굽습니다. 네트워크 의존이 사라지고 오프라인에서도 금속 반사가 그대로 나옵니다.
+
+### 이름표가 DOM인 이유
+
+한글입니다. 3D 텍스트는 폰트 파일을 따로 실어야 하고 한글 글리프가 많아 무겁습니다.
+`<Html>`로 DOM을 3D 위에 얹으면 시스템 폰트를 그대로 씁니다. 대신 원기둥 뒤로 돌아간
+이름표는 스스로 숨겨야 해서 정면 판정을 직접 합니다.
 
 ### 효과음
 
-오디오 파일이 없습니다. Web Audio API로 그때그때 합성합니다. 저장소가 가볍고 오프라인에서도
-동작하며, 가로선이 꽂히는 타이밍에 맞춰 음정을 흩뜨리는 것 같은 조작도 가능합니다.
+오디오 파일이 없습니다. Web Audio API로 그때그때 합성합니다. 사다리 BGM은 16분음표
+32칸짜리 루프를 오디오 시계에 미리 예약하는 방식이라 박자가 흔들리지 않습니다.
+
+## 다크 전용
+
+발광·반사·블룸이 전부 어두운 배경을 전제로 맞춰져 있어 라이트 모드를 두지 않았습니다.
 
 ## 접근성
 
-`prefers-reduced-motion`을 켠 사용자에게는 날아드는 연출과 색종이를 생략하고 결과만 보여 줍니다.
+`prefers-reduced-motion`을 켠 사용자에게는 색종이와 장식용 전환을 생략합니다.
 
 ## 배포
 
-Vercel 기준으로 설정되어 있습니다 (`base: '/'`, SPA 리라이트는 `vercel.json`).
+Vercel 기준입니다. 빌드 설정은 `vercel.json`에 있습니다(대시보드 설정보다 우선합니다).
 
 ```bash
 npm run build   # dist/

@@ -16,10 +16,11 @@ import { clamp } from './utils'
  */
 
 /** 원기둥의 높이(월드 단위). */
-export const CYLINDER_HEIGHT = 5.6
+export const CYLINDER_HEIGHT = 4.6
 /** 이웃한 세로줄 사이에 두고 싶은 간격. */
-const DESIRED_CHORD = 0.72
-const MIN_RADIUS = 1.5
+const DESIRED_CHORD = 0.8
+/** 인원이 적어도 원통이 납작해 보이지 않을 만큼의 굵기. */
+const MIN_RADIUS = 1.85
 const MAX_RADIUS = 4.4
 
 export interface LadderGeometry {
@@ -68,11 +69,27 @@ export function computeGeometry(count: number, rows: number): LadderGeometry {
 }
 
 /**
- * 사람마다 구분되는 색. 47도씩 건너뛰어 인접한 사람끼리 색이 겹치지 않는다.
- * three.js의 Color가 파싱할 수 있도록 쉼표 형식으로 쓴다.
+ * 사람마다 구분되는 색.
+ *
+ * HSL을 균등하게 도는 무지개는 화면에서 서로 밝기가 제각각이라 지저분해 보인다.
+ * 밝기를 맞춰 고른 색만 쓰고, 인원이 많으면 순환한다. 이웃한 순번끼리 색상환에서
+ * 멀어지도록 순서를 섞어 두었다.
  */
+const PALETTE = [
+  '#22d3ee', // cyan
+  '#f472b6', // pink
+  '#a3e635', // lime
+  '#a78bfa', // violet
+  '#fbbf24', // amber
+  '#38bdf8', // sky
+  '#fb7185', // rose
+  '#34d399', // emerald
+  '#c084fc', // purple
+  '#fb923c', // orange
+]
+
 export function personColor(index: number): string {
-  return `hsl(${(index * 47) % 360}, 92%, 62%)`
+  return PALETTE[index % PALETTE.length]
 }
 
 /** 가로선이 하나씩 꽂히는 간격(ms). */

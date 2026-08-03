@@ -2,11 +2,13 @@ import { memo, useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Html } from '@react-three/drei'
 import {
-  CatmullRomCurve3,
+  Color,
+  CurvePath,
+  LineCurve3,
   Quaternion,
+  ShaderMaterial,
   TubeGeometry,
   Vector3,
-  type BufferGeometry,
   type Mesh,
 } from 'three'
 import type { LadderPlan } from '../lib/ladder'
@@ -99,9 +101,11 @@ function LadderRigImpl({
               key={`${playToken}-${activeIndex ?? 'all'}-${lane.personIndex}`}
               points={lane.points}
               color={personColor(lane.personIndex)}
-              delayMs={lane.delayMs}
+              delayMs={activeIndex === null ? lane.delayMs : 0}
               durationMs={lane.durationMs}
               instant={instant}
+              // 한 사람만 볼 때는 굵게 그려 또렷하게 보이도록 한다.
+              thick={activeIndex !== null}
             />
           ))}
 
@@ -198,12 +202,14 @@ function Rung({
     }
   }, [seed, target.middle.y])
 
-  const startedAt = useRef(0)
+  // 0을 "아직 시작 안 함"으로 쓰면 안 된다. clock.elapsedTime의 첫 프레임 값이 0이라
+  // 시작 시각이 영원히 갱신되지 않고 애니메이션이 멈춘다.
+  const startedAt = useRef<number | null>(null)
 
   useFrame(({ clock }) => {
     const mesh = ref.current
     if (!mesh) return
-    if (startedAt.current === 0) startedAt.current = clock.elapsedTime
+    if (startedAt.current === null) startedAt.current = clock.elapsedTime
 
     const elapsed = (clock.elapsedTime - startedAt.current) * 1000
     const t = instant ? 1 : clamp((elapsed - delayMs) / RUNG_FLY_MS, 0, 1)
@@ -225,56 +231,124 @@ function Rung({
 
 /* ── 지나간 길 ──────────────────────────────────────────────── */
 
+/**
+ * 트레일 셰이더.
+ *
+ * TubeGeometry의 uv.x는 튜브 길이를 따라 0→1로 흐른다. 그 값을 진행률과 비교해
+ *   - 아직 지나지 않은 구간은 버리고(discard)
+ *   - 머리 쪽은 흰색으로 타오르게, 꼬리는 어둡게
+ * 칠한다. 인덱스를 잘라 그리는 방식보다 경계가 깨끗하고, 무엇보다 "지금 여기를
+ * 지나고 있다"가 한눈에 보인다.
+ */
+const TRAIL_VERTEX = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`
+
+const TRAIL_FRAGMENT = /* glsl */ `
+  uniform float uProgress;
+  uniform vec3 uColor;
+  varying vec2 vUv;
+
+  void main() {
+    if (vUv.x > uProgress) discard;
+
+    float behind = uProgress - vUv.x;
+    float hot = smoothstep(0.09, 0.0, behind);          // 머리에 가까울수록 1
+    // 꼬리도 충분히 밝아야 금속 가로선에 묻히지 않는다.
+    float tail = mix(0.85, 1.0, smoothstep(0.5, 0.0, behind));
+
+    vec3 color = mix(uColor * 2.1, vec3(2.4), hot * 0.9);
+    gl_FragColor = vec4(color * tail, 1.0);
+  }
+`
+
 function Trail({
   points,
   color,
   delayMs,
   durationMs,
   instant,
+  thick,
 }: {
   points: Vector3[]
   color: string
   delayMs: number
   durationMs: number
   instant: boolean
+  thick: boolean
 }) {
   /**
-   * 튜브를 통째로 만들어 두고 인덱스의 draw range만 늘려 간다.
-   * TubeGeometry의 인덱스는 길이 방향으로 생성되므로, 앞에서부터 잘라 그리면
-   * 정확히 "그려지며 내려가는" 그림이 된다. 매 프레임 지오메트리를 다시
-   * 만들지 않으므로 사람이 많아도 부담이 없다.
+   * 코너를 곡선으로 잇지 않는다.
+   * 사다리의 세로줄과 가로선은 실제로 직선이고, 곡선으로 뭉개면 굵은 지렁이처럼
+   * 보인다. 직선만 이어 붙여 직각을 살리면 회로 기판의 배선처럼 읽힌다.
    */
-  const geometry = useMemo(() => {
-    const curve = new CatmullRomCurve3(points, false, 'centripetal', 0.4)
-    return new TubeGeometry(curve, Math.max(96, points.length * 26), 0.05, 8, false)
+  const curve = useMemo(() => {
+    const path = new CurvePath<Vector3>()
+    for (let i = 1; i < points.length; i += 1) {
+      // 길이가 0인 구간(가로선 시작점 = 직전 세로선 끝점)은 곡선 계산을 깨뜨린다.
+      if (points[i].distanceToSquared(points[i - 1]) < 1e-8) continue
+      path.add(new LineCurve3(points[i - 1], points[i]))
+    }
+    return path
   }, [points])
 
-  useEffect(() => () => geometry.dispose(), [geometry])
+  const geometry = useMemo(
+    () => new TubeGeometry(curve, Math.max(160, points.length * 34), thick ? 0.036 : 0.025, 7, false),
+    [curve, points.length, thick],
+  )
 
-  const startedAt = useRef(0)
+  const material = useMemo(
+    () =>
+      new ShaderMaterial({
+        uniforms: {
+          uProgress: { value: 0 },
+          uColor: { value: new Color(color) },
+        },
+        vertexShader: TRAIL_VERTEX,
+        fragmentShader: TRAIL_FRAGMENT,
+        // 톤매핑을 끄면 색이 1을 넘어 블룸이 번진다.
+        toneMapped: false,
+      }),
+    [color],
+  )
+
+  useEffect(() => {
+    return () => {
+      geometry.dispose()
+      material.dispose()
+    }
+  }, [geometry, material])
+
+  const headRef = useRef<Mesh>(null)
+  const startedAt = useRef<number | null>(null)
 
   useFrame(({ clock }) => {
-    if (startedAt.current === 0) startedAt.current = clock.elapsedTime
-
-    const total = (geometry as BufferGeometry).getIndex()?.count ?? 0
-    if (total === 0) return
+    if (startedAt.current === null) startedAt.current = clock.elapsedTime
 
     const elapsed = (clock.elapsedTime - startedAt.current) * 1000
     const t = instant ? 1 : clamp((elapsed - delayMs) / Math.max(durationMs, 1), 0, 1)
-    geometry.setDrawRange(0, Math.floor(total * t))
+    material.uniforms.uProgress.value = t
+
+    // 선두의 발광 구슬. 다 내려가면 치운다.
+    const head = headRef.current
+    if (!head) return
+    const moving = t > 0 && t < 1
+    head.visible = moving
+    if (moving) head.position.copy(curve.getPointAt(t))
   })
 
   return (
-    <mesh geometry={geometry}>
-      <meshStandardMaterial
-        color={color}
-        emissive={color}
-        emissiveIntensity={2.6}
-        roughness={0.35}
-        // 톤매핑을 끄면 색이 1을 넘어 블룸이 강하게 번진다.
-        toneMapped={false}
-      />
-    </mesh>
+    <group>
+      <mesh geometry={geometry} material={material} />
+      <mesh ref={headRef} visible={false}>
+        <sphereGeometry args={[thick ? 0.075 : 0.055, 14, 14]} />
+        <meshBasicMaterial color="#ffffff" toneMapped={false} />
+      </mesh>
+    </group>
   )
 }
 
