@@ -1,10 +1,10 @@
-import type { AppState } from './types'
+import type { AppState, Difficulty } from './types'
 import { appendPeople, clamp } from './utils'
 
 /**
  * QueryString ↔ 앱 상태 변환. URL이 곧 저장소다.
  *
- *   ?people=철수,영희,민수&win=1&seed=284719&wins=철수:2,영희:1&done=1
+ *   ?people=철수,영희,민수&win=1&mode=hell&seed=284719&wins=철수:2,영희:1&done=1
  *
  * 사다리 구조는 담지 않는다. seed가 같으면 난수열이 같고, 난수열이 같으면
  * 가로선 배치와 당첨 배정까지 완전히 똑같이 재현되기 때문이다.
@@ -74,9 +74,14 @@ export function parseQuery(search: string): AppState | null {
     Math.max(people.length, 1),
   )
 
+  const mode = params.get('mode')
+  const difficulty: Difficulty =
+    mode === 'easy' || mode === 'hell' ? mode : 'normal'
+
   return {
     people,
     winCount,
+    difficulty,
     seed,
     wins: decodeWins(params.get('wins') ?? ''),
     // 사다리가 없으면 공개할 결과도 없다.
@@ -91,6 +96,7 @@ export function buildQuery(state: AppState): string {
     parts.push(`people=${encodeList(state.people.map((p) => p.name))}`)
   }
   parts.push(`win=${state.winCount}`)
+  if (state.difficulty !== 'normal') parts.push(`mode=${state.difficulty}`)
   if (state.seed !== null) parts.push(`seed=${state.seed}`)
 
   const wins = encodeWins(state.wins)

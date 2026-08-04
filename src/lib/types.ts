@@ -42,10 +42,19 @@ export interface Trace {
 
 export type Phase = 'edit' | 'ready' | 'running' | 'done'
 
+/**
+ * 난이도.
+ *
+ * 가로선 밀도와 관통선 빈도를 바꾸고, 씬의 세계관까지 함께 바꾼다.
+ * 눈으로 경로를 따라갈 수 있는지가 실제로 달라진다.
+ */
+export type Difficulty = 'easy' | 'normal' | 'hell'
+
 export interface AppState {
   people: Person[]
   /** 당첨 인원 수. 나머지는 전부 '꽝'이 된다. */
   winCount: number
+  difficulty: Difficulty
   /** 사다리를 결정하는 난수 시드. null이면 아직 사다리가 없다. */
   seed: number | null
   /**

@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { AppState } from '../lib/types'
+import type { AppState, Difficulty } from '../lib/types'
 import { buildQuery, parseQuery } from '../lib/query'
 import { loadState, saveState } from '../lib/storage'
 import { createSeed, planLadder } from '../lib/ladder'
 import { weightFor, winProbabilities } from '../lib/probability'
 import { appendPeople, clamp, moveItem, normalizeName, parseNames } from '../lib/utils'
 
-const EMPTY: AppState = { people: [], winCount: 1, seed: null, wins: {}, revealed: false }
+const EMPTY: AppState = {
+  people: [],
+  winCount: 1,
+  difficulty: 'normal',
+  seed: null,
+  wins: {},
+  revealed: false,
+}
 
 /**
  * 초기 상태의 출처 우선순위:
@@ -106,6 +113,14 @@ export function useAppState() {
     [invalidate],
   )
 
+  /** 난이도를 바꾸면 가로선 밀도가 달라지므로 기존 사다리는 무효다. */
+  const setDifficulty = useCallback(
+    (difficulty: Difficulty) => {
+      setState((prev) => (prev.difficulty === difficulty ? prev : invalidate({ ...prev, difficulty })))
+    },
+    [invalidate],
+  )
+
   /** 새 시드를 뽑아 사다리를 다시 짠다. 결과는 아직 감춘 상태. */
   const rollLadder = useCallback(() => {
     setState((prev) => ({ ...prev, seed: createSeed(), revealed: false }))
@@ -164,8 +179,14 @@ export function useAppState() {
 
   const plan = useMemo(() => {
     if (state.seed === null || state.people.length === 0) return null
-    return planLadder(state.people.length, state.winCount, state.seed, weights)
-  }, [state.people.length, state.winCount, state.seed, weights])
+    return planLadder(
+      state.people.length,
+      state.winCount,
+      state.seed,
+      weights,
+      state.difficulty,
+    )
+  }, [state.people.length, state.winCount, state.seed, weights, state.difficulty])
 
   const winnerIds = useMemo(() => {
     if (!plan) return new Set<string>()
@@ -184,6 +205,7 @@ export function useAppState() {
     reorderPeople,
     clearPeople,
     setWinCount,
+    setDifficulty,
     rollLadder,
     reveal,
     resetLadder,

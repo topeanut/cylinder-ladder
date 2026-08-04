@@ -23,6 +23,8 @@ export default function App() {
   const [running, setRunning] = useState(false)
   const [playToken, setPlayToken] = useState(0)
   const [activeIndex, setActiveIndex] = useState<number | null>(null)
+  /** 경로를 거슬러 올라가는 중인지. 결과 칸을 눌러 주인을 찾을 때 켜진다. */
+  const [reverse, setReverse] = useState(false)
   /**
    * 이번 화면에서 결과가 공개된 사람들(명단 순번).
    *
@@ -116,6 +118,7 @@ export default function App() {
   const handleRoll = useCallback(() => {
     arrivedRevealed.current = false
     setActiveIndex(null)
+    setReverse(false)
     setPlayToken(0)
     setRevealedPeople(new Set())
     app.rollLadder()
@@ -125,6 +128,7 @@ export default function App() {
     if (running || !app.plan) return
     arrivedRevealed.current = false
     setActiveIndex(null)
+    setReverse(false)
     setPlayToken((token) => token + 1)
     setRunning(true)
   }, [app.plan, running])
@@ -153,6 +157,7 @@ export default function App() {
 
   const handleReset = useCallback(() => {
     setActiveIndex(null)
+    setReverse(false)
     setPlayToken(0)
     setRevealedPeople(new Set())
     arrivedRevealed.current = false
@@ -166,6 +171,7 @@ export default function App() {
 
       const next = activeIndex === index ? null : index
       setActiveIndex(next)
+      setReverse(false)
       setPlayToken((token) => token + 1)
       arrivedRevealed.current = false
       if (next !== null) setRunning(true)
@@ -173,16 +179,39 @@ export default function App() {
     [activeIndex, app.seed, running],
   )
 
+  /**
+   * 결과 칸에서 거꾸로 올라가 주인을 찾는다.
+   *
+   * 사다리는 순열이라 역함수가 존재한다. 그래서 "이 칸에 도착하는 사람"이 정확히
+   * 한 명 있고, 그 사람의 경로를 뒤집어 그리면 아래에서 위로 거슬러 올라간다.
+   */
+  const handleSelectSlot = useCallback(
+    (slotIndex: number) => {
+      if (!app.plan || running) return
+
+      const owner = app.plan.traces.findIndex((trace) => trace.end === slotIndex)
+      if (owner === -1) return
+
+      setActiveIndex(owner)
+      setReverse(true)
+      setPlayToken((token) => token + 1)
+      arrivedRevealed.current = false
+      setRunning(true)
+    },
+    [app.plan, running],
+  )
+
   // 공유에 실릴 값만 추려 둔다. app 객체 전체를 의존성에 걸면 매 렌더 새로 만들어진다.
   const shareable = useMemo(
     () => ({
       people: app.people,
       winCount: app.winCount,
+      difficulty: app.difficulty,
       seed: app.seed,
       wins: app.wins,
       revealed: false,
     }),
-    [app.people, app.winCount, app.seed, app.wins],
+    [app.people, app.winCount, app.difficulty, app.seed, app.wins],
   )
 
   const shareUrl = useMemo(() => buildShareUrl(shareable, true), [shareable])
@@ -211,6 +240,8 @@ export default function App() {
           phase={phase}
           peopleCount={app.people.length}
           winCount={app.winCount}
+          difficulty={app.difficulty}
+          onDifficultyChange={app.setDifficulty}
           shareUrl={shareUrl}
           sealedUrl={sealedUrl}
           onWinCountChange={app.setWinCount}
@@ -250,6 +281,7 @@ export default function App() {
 
       <main className="absolute inset-0 min-[900px]:relative min-[900px]:h-svh min-[900px]:flex-1">
         <LadderScene
+          difficulty={app.difficulty}
           running={running}
           playDurationMs={playDurationMs}
           onPlayEnd={handlePlayEnd}
@@ -261,8 +293,10 @@ export default function App() {
           buildToken={app.seed ?? 0}
           playToken={playToken}
           activeIndex={activeIndex}
+          reverse={reverse}
           instant={instant}
           onSelectPerson={handleSelectPerson}
+          onSelectSlot={handleSelectSlot}
         />
 
         {/* WebGL이 붙기 전의 검은 화면을 덮는다 */}
@@ -285,7 +319,7 @@ export default function App() {
         <p className="pointer-events-none absolute inset-x-0 bottom-24 text-center text-xs text-neutral-500 min-[900px]:bottom-3">
           {app.people.length === 0
             ? '아래 버튼으로 이름을 추가해 보세요'
-            : '끌어서 돌리고, 휠·손가락 두 개로 확대·축소할 수 있습니다'}
+            : '끌어서 돌리고, 아래 결과 칸을 누르면 주인을 거꾸로 찾아 올라갑니다'}
         </p>
       </main>
 

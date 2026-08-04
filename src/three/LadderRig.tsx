@@ -43,9 +43,13 @@ export interface LadderRigProps {
   playToken: number
   /** null이면 전원, 숫자면 그 사람만 그린다. */
   activeIndex: number | null
+  /** true면 경로를 아래에서 위로 거슬러 그린다(거꾸로 타기). */
+  reverse: boolean
   /** 애니메이션 없이 최종 상태로 그린다(공유 링크로 바로 들어온 경우). */
   instant: boolean
   onSelectPerson: (index: number) => void
+  /** 결과 칸을 눌렀을 때. 거꾸로 타기의 출발점이 된다. */
+  onSelectSlot: (slotIndex: number) => void
 }
 
 function LadderRigImpl({
@@ -56,8 +60,10 @@ function LadderRigImpl({
   buildToken,
   playToken,
   activeIndex,
+  reverse,
   instant,
   onSelectPerson,
+  onSelectSlot,
 }: LadderRigProps) {
   const count = people.length
   const top = CYLINDER_HEIGHT / 2
@@ -108,13 +114,14 @@ function LadderRigImpl({
 
       {/* 지나간 길 */}
       {plan && showTrails && (
-        <Fragment key={`trail-${playToken}-${activeIndex ?? 'all'}`}>
+        <Fragment key={`trail-${playToken}-${activeIndex ?? 'all'}-${reverse ? 'up' : 'down'}`}>
           {lanes
             .filter((lane) => activeIndex === null || lane.personIndex === activeIndex)
             .map((lane) => (
               <Trail
                 key={lane.personIndex}
-                points={lane.points}
+                // 점 순서를 뒤집으면 셰이더가 그대로 아래에서 위로 그린다.
+                points={reverse ? [...lane.points].reverse() : lane.points}
                 color={personColor(lane.personIndex)}
                 delayMs={activeIndex === null ? lane.delayMs : 0}
                 durationMs={lane.durationMs}
@@ -163,17 +170,21 @@ function LadderRigImpl({
               azimuth={geo.azimuth(index)}
               position={geo.railPoint(index, -top - 0.62)}
             >
-              <div
+              <button
+                type="button"
+                onClick={() => onSelectSlot(index)}
+                title="이 칸의 주인을 거꾸로 찾아 올라갑니다"
                 className={cn(
                   'flex min-w-[3.5rem] items-center justify-center rounded-xl px-3 py-1.5',
                   'text-[13px] font-extrabold whitespace-nowrap backdrop-blur',
+                  'transition-transform hover:scale-105',
                   isWin
                     ? 'bg-amber-400 text-neutral-950 shadow-[0_0_28px_rgba(251,191,36,0.9)]'
                     : 'bg-neutral-800/70 text-neutral-500',
                 )}
               >
                 {isWin ? '당첨' : '꽝'}
-              </div>
+              </button>
             </FacingLabel>
           </Fragment>
         ))}

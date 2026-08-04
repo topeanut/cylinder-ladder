@@ -1,4 +1,4 @@
-import type { Ladder, PathSegment, Rung, Trace } from './types'
+import type { Difficulty, Ladder, PathSegment, Rung, Trace } from './types'
 import { clamp, mod } from './utils'
 
 /**
@@ -25,15 +25,36 @@ export function createSeed(): number {
   return Math.floor(Math.random() * 0xffffffff) >>> 0
 }
 
-/** 인원 수에 맞춰 가로선을 놓을 행의 개수를 정한다. */
-export function rowCountFor(count: number): number {
-  return clamp(count + 4, 8, 18)
-}
-
 /** 관통 가로선을 놓을 수 있는 최소 인원. 이보다 적으면 "마주보는 줄"이 없다. */
 const THROUGH_MIN_COUNT = 5
-/** 한 행에 관통선이 놓일 확률. 너무 흔하면 원기둥 속이 지저분해진다. */
-const THROUGH_CHANCE = 0.3
+
+/**
+ * 난이도별 사다리 밀도.
+ *
+ * 눈으로 경로를 따라갈 수 있는지가 여기서 갈린다. 쉬움은 관통선이 아예 없어
+ * 평면 사다리처럼 읽히고, 지옥은 관통선이 행마다 여러 개 깔려 원통 속이 엉킨다.
+ */
+const DENSITY: Record<
+  Difficulty,
+  {
+    throughChance: number
+    throughPerRow: number
+    edgeChance: number
+    extraRows: number
+    minRows: number
+    maxRows: number
+  }
+> = {
+  easy: { throughChance: 0, throughPerRow: 0, edgeChance: 0.42, extraRows: 2, minRows: 7, maxRows: 12 },
+  normal: { throughChance: 0.3, throughPerRow: 1, edgeChance: 0.5, extraRows: 4, minRows: 8, maxRows: 18 },
+  hell: { throughChance: 0.85, throughPerRow: 2, edgeChance: 0.55, extraRows: 9, minRows: 14, maxRows: 26 },
+}
+
+/** 인원 수와 난이도에 맞춰 가로선을 놓을 행의 개수를 정한다. */
+export function rowCountFor(count: number, difficulty: Difficulty): number {
+  const density = DENSITY[difficulty]
+  return clamp(count + density.extraRows, density.minRows, density.maxRows)
+}
 
 function shuffle<T>(items: T[], rng: () => number): T[] {
   const out = items.slice()
@@ -51,31 +72,35 @@ function shuffle<T>(items: T[], rng: () => number): T[] {
  * 두 번 건드리면 그 줄에서 갈 곳이 둘이 되어 사다리가 성립하지 않는다.
  * 이 규칙 하나가 이웃 가로선과 관통 가로선을 동시에 다스린다.
  */
-function pickRowRungs(count: number, rng: () => number): Rung[] {
+function pickRowRungs(count: number, difficulty: Difficulty, rng: () => number): Rung[] {
+  const density = DENSITY[difficulty]
   const rungs: Rung[] = []
   const used = new Set<number>()
 
-  // 관통 가로선은 행마다 최대 하나. 원통 속을 가로지르는 선이 여러 개면 엉킨다.
-  if (count >= THROUGH_MIN_COUNT && rng() < THROUGH_CHANCE) {
+  // 관통 가로선. 난이도가 올라갈수록 자주, 그리고 한 행에 여러 개까지 놓인다.
+  for (let attempt = 0; attempt < density.throughPerRow; attempt += 1) {
+    if (count < THROUGH_MIN_COUNT || rng() >= density.throughChance) continue
+
     const from = Math.floor(rng() * count)
     const half = Math.floor(count / 2)
     // 정확히 반대편이면 매번 같은 모양이라, 한 칸 흔들어 준다.
     const to = mod(from + half + (rng() < 0.5 ? 0 : 1), count)
 
+    if (used.has(from) || used.has(to)) continue
     // 이웃끼리 이으면 그건 그냥 겉면 가로선이다. 관통일 때만 인정한다.
     const apart = Math.min(mod(to - from, count), mod(from - to, count))
-    if (apart > 1) {
-      rungs.push({ kind: 'through', from, to })
-      used.add(from)
-      used.add(to)
-    }
+    if (apart <= 1) continue
+
+    rungs.push({ kind: 'through', from, to })
+    used.add(from)
+    used.add(to)
   }
 
   // 두 명뿐이면 원통을 한 바퀴 돌아도 이을 쌍이 하나다.
   const gapCount = count === 2 ? 1 : count
 
   for (const gap of shuffle(Array.from({ length: gapCount }, (_, i) => i), rng)) {
-    if (rng() > 0.5) continue
+    if (rng() > density.edgeChance) continue
     const left = gap
     const right = mod(gap + 1, count)
     if (used.has(left) || used.has(right)) continue
@@ -88,14 +113,18 @@ function pickRowRungs(count: number, rng: () => number): Rung[] {
   return rungs
 }
 
-export function buildLadder(count: number, rng: () => number): Ladder {
-  const rows = rowCountFor(count)
+export function buildLadder(
+  count: number,
+  difficulty: Difficulty,
+  rng: () => number,
+): Ladder {
+  const rows = rowCountFor(count, difficulty)
   if (count < 2) return { count, rows, rungs: Array.from({ length: rows }, () => []) }
 
   return {
     count,
     rows,
-    rungs: Array.from({ length: rows }, () => pickRowRungs(count, rng)),
+    rungs: Array.from({ length: rows }, () => pickRowRungs(count, difficulty, rng)),
   }
 }
 
@@ -204,9 +233,10 @@ export function planLadder(
   winCount: number,
   seed: number,
   weights: number[],
+  difficulty: Difficulty,
 ): LadderPlan {
   const rng = createRng(seed)
-  const ladder = buildLadder(count, rng)
+  const ladder = buildLadder(count, difficulty, rng)
   const traces = Array.from({ length: count }, (_, i) => tracePath(ladder, i))
 
   const winners = weightedSample(weights, winCount, rng)

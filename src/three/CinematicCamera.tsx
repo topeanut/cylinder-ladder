@@ -25,9 +25,16 @@ interface CinematicCameraProps {
   active: boolean
   lanes: Lane[]
   activeIndex: number | null
+  /** 경로를 거슬러 올라가는 중인지. 카메라도 같은 방향으로 움직여야 한다. */
+  reverse: boolean
 }
 
-export function CinematicCamera({ active, lanes, activeIndex }: CinematicCameraProps) {
+export function CinematicCamera({
+  active,
+  lanes,
+  activeIndex,
+  reverse,
+}: CinematicCameraProps) {
   const camera = useThree((state) => state.camera)
   const controls = useThree((state) => state.controls) as OrbitControlsImpl | null
 
@@ -42,13 +49,15 @@ export function CinematicCamera({ active, lanes, activeIndex }: CinematicCameraP
 
   const curve = useMemo(() => {
     if (!lane) return null
+    const points = reverse ? [...lane.points].reverse() : lane.points
+
     const path = new CurvePath<Vector3>()
-    for (let i = 1; i < lane.points.length; i += 1) {
-      if (lane.points[i].distanceToSquared(lane.points[i - 1]) < 1e-8) continue
-      path.add(new LineCurve3(lane.points[i - 1], lane.points[i]))
+    for (let i = 1; i < points.length; i += 1) {
+      if (points[i].distanceToSquared(points[i - 1]) < 1e-8) continue
+      path.add(new LineCurve3(points[i - 1], points[i]))
     }
     return path.curves.length > 0 ? path : null
-  }, [lane])
+  }, [lane, reverse])
 
   const elapsedRef = useRef(0)
   const head = useMemo(() => new Vector3(), [])

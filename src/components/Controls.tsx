@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { Check, EyeOff, Link2, Minus, Play, Plus, RotateCcw, Shuffle } from 'lucide-react'
-import type { Phase } from '../lib/types'
+import type { Difficulty, Phase } from '../lib/types'
 import { Button, IconButton, Panel } from './ui'
 import { cn } from '../lib/utils'
 
@@ -8,6 +8,8 @@ interface ControlsProps {
   phase: Phase
   peopleCount: number
   winCount: number
+  difficulty: Difficulty
+  onDifficultyChange: (value: Difficulty) => void
   /** 결과가 보이는 링크. */
   shareUrl: string
   /** 결과가 가려진 링크. 받은 사람이 직접 타야 공개된다. */
@@ -19,6 +21,36 @@ interface ControlsProps {
 }
 
 type Copied = 'none' | 'share' | 'sealed'
+
+/**
+ * 난이도는 가로선 밀도만 바꾸는 게 아니라 씬의 세계관까지 바꾼다.
+ * 고르는 순간 배경이 통째로 달라지므로 설명도 그 점을 짚어 준다.
+ */
+const DIFFICULTIES: Array<{
+  value: Difficulty
+  label: string
+  hint: string
+  active: string
+}> = [
+  {
+    value: 'easy',
+    label: '쉬움',
+    hint: '풀밭. 관통 가로선이 없어 눈으로 경로를 따라갈 수 있습니다.',
+    active: 'bg-emerald-500 text-neutral-950',
+  },
+  {
+    value: 'normal',
+    label: '보통',
+    hint: '관통 가로선이 가끔 섞입니다. 따라가려면 집중해야 합니다.',
+    active: 'bg-amber-500 text-neutral-950',
+  },
+  {
+    value: 'hell',
+    label: '지옥',
+    hint: '용암. 관통선이 행마다 깔려 원기둥 속이 거미줄이 됩니다.',
+    active: 'bg-red-600 text-neutral-50',
+  },
+]
 
 async function copy(text: string) {
   try {
@@ -40,6 +72,8 @@ function ControlsImpl({
   phase,
   peopleCount,
   winCount,
+  difficulty,
+  onDifficultyChange,
   shareUrl,
   sealedUrl,
   onWinCountChange,
@@ -64,6 +98,31 @@ function ControlsImpl({
 
   return (
     <Panel className="flex flex-col gap-4">
+      <div>
+        <span className="mb-1.5 block text-sm font-medium text-neutral-100">난이도</span>
+        <div className="grid grid-cols-3 gap-1 rounded-xl bg-neutral-900/70 p-1">
+          {DIFFICULTIES.map((level) => (
+            <button
+              key={level.value}
+              type="button"
+              onClick={() => onDifficultyChange(level.value)}
+              disabled={busy}
+              className={cn(
+                'rounded-lg px-2 py-1.5 text-xs font-bold transition-colors disabled:opacity-50',
+                difficulty === level.value
+                  ? level.active
+                  : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200',
+              )}
+            >
+              {level.label}
+            </button>
+          ))}
+        </div>
+        <p className="mt-1.5 text-xs leading-relaxed text-neutral-400">
+          {DIFFICULTIES.find((level) => level.value === difficulty)?.hint}
+        </p>
+      </div>
+
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <span className="block text-sm font-medium text-neutral-100">당첨 인원</span>
