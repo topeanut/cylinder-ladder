@@ -60,8 +60,11 @@ const GROUND_VERTEX = /* glsl */ `
  * 갈라진 지각(어두운 부분)과 그 틈으로 보이는 마그마(밝은 부분)를 잡음 하나로
  * 나눈다. 임계값 근처를 부드럽게 이어 붙이면 식어 굳은 가장자리가 생긴다.
  *
- * 색은 초록 성분을 눌러 빨강을 지킨다. 초록이 올라가면 곧바로 주황·노랑으로
- * 보이기 때문이다. 대신 빨강을 1보다 훨씬 크게 올려 블룸이 세게 번지게 한다.
+ * 색은 초록·파랑을 거의 0으로 눌러 순수한 빨강만 남긴다. 초록이 조금만 올라가도
+ * 주황·노랑으로 새기 때문이다. 대신 빨강을 1보다 훨씬 크게 올려 블룸이 세게 번진다.
+ *
+ * 지옥처럼 보이는 건 밝기가 아니라 **대비**다. 지각을 거의 검정으로 떨어뜨리고
+ * 그 사이 갈라진 틈만 시뻘겋게 타오르게 해야 용암이 용암으로 읽힌다.
  */
 const LAVA_FRAGMENT = /* glsl */ `
   uniform float uTime;
@@ -75,18 +78,19 @@ const LAVA_FRAGMENT = /* glsl */ `
     float flow = fbm(p + vec2(uTime * 0.06, uTime * -0.04));
     float crack = fbm(p * 0.6 + flow * 1.4 + vec2(0.0, uTime * 0.02));
 
-    // 경계를 넓게 잡아 마그마가 드러나는 면적을 늘린다.
-    float molten = smoothstep(0.58, 0.28, crack);
+    // 경계를 좁혀 지각(검정)이 넓게 남고 갈라진 틈만 타오르게 한다.
+    float molten = smoothstep(0.50, 0.33, crack);
 
-    // 지각도 완전한 검정이 아니라 식은 숯의 붉은 기를 남긴다.
-    vec3 crustColor = mix(vec3(0.16, 0.03, 0.02), vec3(0.42, 0.07, 0.05), flow);
-    vec3 magmaColor = mix(vec3(2.2, 0.10, 0.04), vec3(5.0, 0.55, 0.10), molten);
+    // 지각은 거의 검정. 아주 옅은 붉은 기만 남겨 완전히 죽은 면이 되지 않게 한다.
+    vec3 crustColor = mix(vec3(0.012, 0.004, 0.004), vec3(0.07, 0.012, 0.010), flow);
+    // 마그마는 초록·파랑을 0에 가깝게 눌러 노란빛이 섞이지 않게 한다.
+    vec3 magmaColor = mix(vec3(1.4, 0.03, 0.012), vec3(6.0, 0.16, 0.04), molten);
 
     vec3 color = mix(crustColor, magmaColor, molten);
 
-    // 중앙에서 멀어질수록 어둡게 하되, 바닥값을 높여 가장자리도 살아 있게 한다.
-    float fade = 1.0 - smoothstep(0.2, 0.62, distance(vUv, vec2(0.5)));
-    gl_FragColor = vec4(color * (0.78 + fade * 0.55), 1.0);
+    // 가장자리는 어둠에 잠기게 둔다. 검정이 넓을수록 틈의 빨강이 더 뜨거워 보인다.
+    float fade = 1.0 - smoothstep(0.16, 0.58, distance(vUv, vec2(0.5)));
+    gl_FragColor = vec4(color * (0.5 + fade * 0.85), 1.0);
   }
 `
 
@@ -114,15 +118,16 @@ const GRASS_FRAGMENT = /* glsl */ `
     float blades = valueNoise(vec2(p.x * 14.0 + sway * 6.0, p.y * 2.2));
     float fine = valueNoise(vec2(p.x * 34.0, p.y * 5.0));
 
-    vec3 shade = vec3(0.06, 0.20, 0.08);
-    vec3 mid = vec3(0.16, 0.44, 0.16);
-    vec3 sunlit = vec3(0.46, 0.82, 0.34);
+    // 연두. 빨강 성분을 함께 올려야 짙은 초록이 아니라 노란빛 도는 연두가 된다.
+    vec3 shade = vec3(0.20, 0.38, 0.09);
+    vec3 mid = vec3(0.42, 0.68, 0.16);
+    vec3 sunlit = vec3(0.78, 0.98, 0.36);
 
     vec3 color = mix(shade, mid, patch);
     color = mix(color, sunlit, blades * 0.55 + fine * 0.18);
 
-    float fade = 1.0 - smoothstep(0.22, 0.62, distance(vUv, vec2(0.5)));
-    gl_FragColor = vec4(color * (0.72 + fade * 0.6), 1.0);
+    float fade = 1.0 - smoothstep(0.24, 0.66, distance(vUv, vec2(0.5)));
+    gl_FragColor = vec4(color * (0.82 + fade * 0.5), 1.0);
   }
 `
 

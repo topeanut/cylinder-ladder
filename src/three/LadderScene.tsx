@@ -1,6 +1,6 @@
 import { Suspense, useRef } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { Environment, Lightformer, OrbitControls } from '@react-three/drei'
+import { Environment, Lightformer, OrbitControls, Sky } from '@react-three/drei'
 import { Bloom, EffectComposer, Vignette } from '@react-three/postprocessing'
 import type { Difficulty } from '../lib/types'
 import { CinematicCamera } from './CinematicCamera'
@@ -32,15 +32,15 @@ const THEMES: Record<
   }
 > = {
   easy: {
-    // 한낮의 들판. 배경까지 초록으로 물들여야 바닥만 초록인 어색함이 사라진다.
-    background: '#1b3d22',
-    fog: [22, 52],
-    ambient: 1.25,
+    // 한낮의 들판. 하늘은 <Sky>가 그리므로 배경색은 안개용으로만 쓰인다.
+    background: '#9fc9e8',
+    fog: [30, 70],
+    ambient: 1.35,
     keyLight: '#fffbe8',
-    rimLights: ['#86efac', '#fde68a'],
-    lightformers: ['#ffffff', '#bbf7d0', '#fef9c3'],
-    bloom: 0.6,
-    vignette: 0.3,
+    rimLights: ['#bef264', '#fde68a'],
+    lightformers: ['#ffffff', '#d9f99d', '#fef9c3'],
+    bloom: 0.55,
+    vignette: 0.26,
   },
   normal: {
     background: '#14141c',
@@ -53,15 +53,15 @@ const THEMES: Record<
     vignette: 0.5,
   },
   hell: {
-    // 붉게 달아오른 공기. 초록 성분을 낮게 유지해야 주황으로 새지 않는다.
-    background: '#380805',
-    fog: [16, 38],
-    ambient: 0.85,
-    keyLight: '#ffb9a0',
-    rimLights: ['#ff1f08', '#ff4a12'],
-    lightformers: ['#ff2a08', '#ff1205', '#ff6b3d'],
-    bloom: 1.45,
-    vignette: 0.55,
+    // 그을음이 낀 검붉은 공기. 빛은 바닥의 용암에서만 올라온다.
+    background: '#180301',
+    fog: [12, 32],
+    ambient: 0.5,
+    keyLight: '#ff8f70',
+    rimLights: ['#ff1204', '#c41003'],
+    lightformers: ['#ff1a05', '#8a0a02', '#ff4a1a'],
+    bloom: 1.7,
+    vignette: 0.8,
   },
 }
 
@@ -95,6 +95,15 @@ export function LadderScene({
     >
       <color attach="background" args={[theme.background]} />
       <fog attach="fog" args={[theme.background, ...theme.fog]} />
+
+      {/*
+        쉬움 모드에만 진짜 하늘을 씌운다. drei의 Sky는 대기 산란을 실시간으로
+        계산하므로 이미지 파일이 필요 없다. 풀밭 위에 파란 하늘이 얹혀야
+        비로소 "들판"으로 읽힌다.
+      */}
+      {difficulty === 'easy' && (
+        <Sky sunPosition={[12, 6, -18]} turbidity={5} rayleigh={1.4} distance={4000} />
+      )}
 
       <ambientLight intensity={theme.ambient} />
       <directionalLight position={[6, 9, 7]} intensity={1.4} color={theme.keyLight} />
