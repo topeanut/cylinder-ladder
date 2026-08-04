@@ -6,10 +6,12 @@ import {
   Color,
   CurvePath,
   LineCurve3,
+  Object3D,
   Quaternion,
   ShaderMaterial,
   TubeGeometry,
   Vector3,
+  type InstancedMesh,
   type Mesh,
   type MeshBasicMaterial,
 } from 'three'
@@ -74,6 +76,35 @@ function LadderRigImpl({
    */
   const showTrails = instant || playToken > 0
 
+  /**
+   * 가로선이 촘촘할수록 얇아진다.
+   * 지옥은 행이 120줄을 넘어 행 간격이 0.04까지 좁아지는데, 기본 굵기를 그대로
+   * 두면 서로 겹쳐 한 덩어리로 보인다.
+   */
+  const rows = plan?.ladder.rows ?? 0
+  const rungRadius = rows > 40 ? 0.013 : 0.032
+  const trailRadius = rows > 40 ? 0.017 : 0.025
+
+  /** 가로선 하나하나의 최종 위치. 인스턴싱에 넘길 평평한 목록으로 미리 편다. */
+  const rungItems = useMemo<RungItem[]>(() => {
+    if (!plan) return []
+
+    return plan.ladder.rungs.flatMap((rungs, row) =>
+      rungs.map((rung, orderInRow) => {
+        const [a, b] =
+          rung.kind === 'edge' ? [rung.gap, mod(rung.gap + 1, count)] : [rung.from, rung.to]
+
+        return {
+          from: geo.railPoint(a, geo.rowY(row)),
+          to: geo.railPoint(b, geo.rowY(row)),
+          through: rung.kind === 'through',
+          delayMs: instant ? 0 : rungDelayMs(row, orderInRow),
+          seed: row * 31 + a * 17 + b * 7,
+        }
+      }),
+    )
+  }, [plan, geo, count, instant])
+
   if (count === 0) return null
 
   return (
@@ -88,28 +119,12 @@ function LadderRigImpl({
 
       {/* 가로선 — 사다리를 새로 짤 때마다 사방에서 날아와 꽂힌다 */}
       {plan && (
-        <Fragment key={`rungs-${buildToken}-${plan.ladder.rows}`}>
-          {plan.ladder.rungs.flatMap((rungs, row) =>
-            rungs.map((rung, orderInRow) => {
-              const [a, b] =
-                rung.kind === 'edge'
-                  ? [rung.gap, mod(rung.gap + 1, count)]
-                  : [rung.from, rung.to]
-
-              return (
-                <Rung
-                  key={`${row}-${a}-${b}`}
-                  from={geo.railPoint(a, geo.rowY(row))}
-                  to={geo.railPoint(b, geo.rowY(row))}
-                  through={rung.kind === 'through'}
-                  delayMs={instant ? 0 : rungDelayMs(row, orderInRow)}
-                  instant={instant}
-                  seed={row * 31 + a * 17 + b * 7}
-                />
-              )
-            }),
-          )}
-        </Fragment>
+        <Rungs
+          key={`rungs-${buildToken}-${plan.ladder.rows}`}
+          items={rungItems}
+          radius={rungRadius}
+          instant={instant}
+        />
       )}
 
       {/* 지나간 길 */}
@@ -127,7 +142,7 @@ function LadderRigImpl({
                 durationMs={lane.durationMs}
                 instant={instant}
                 // 한 사람만 볼 때는 굵게 그려 또렷하게 보이도록 한다.
-                thick={activeIndex !== null}
+                radius={activeIndex !== null ? trailRadius * 1.5 : trailRadius}
               />
             ))}
         </Fragment>
@@ -223,92 +238,150 @@ function PrizeBeacon({ position }: { position: Vector3 }) {
 
 /* ── 가로선 ─────────────────────────────────────────────────── */
 
-function Rung({
-  from,
-  to,
-  through,
-  delayMs,
-  instant,
-  seed,
-}: {
+interface RungItem {
   from: Vector3
   to: Vector3
   /** 원통 속을 관통하는 선인지. 겉면 가로선과 다르게 칠해 눈에 띄게 한다. */
   through: boolean
   delayMs: number
-  instant: boolean
   seed: number
+}
+
+/**
+ * 가로선 전체를 두 번의 드로우콜로 그린다(겉면 하나, 관통 하나).
+ *
+ * 지옥 난이도는 가로선이 400개에 육박한다. 하나씩 메시로 만들면 지오메트리도
+ * 드로우콜도 400개가 되어 블룸·반사와 겹치는 순간 프레임이 무너진다. 모양이
+ * 전부 같은 원기둥이므로 InstancedMesh가 정확히 들어맞는다.
+ *
+ * 길이는 인스턴스마다 다른데, 지오메트리를 길이 1로 만들어 두고 y축 배율로
+ * 늘이면 한 벌로 해결된다.
+ */
+function Rungs({
+  items,
+  radius,
+  instant,
+}: {
+  items: RungItem[]
+  radius: number
+  instant: boolean
 }) {
-  const ref = useRef<Mesh>(null)
+  const edgeRef = useRef<InstancedMesh>(null)
+  const throughRef = useRef<InstancedMesh>(null)
 
-  const target = useMemo(() => {
-    const middle = from.clone().add(to).multiplyScalar(0.5)
-    const direction = to.clone().sub(from)
-    return {
-      middle,
-      length: direction.length(),
-      quaternion: new Quaternion().setFromUnitVectors(UP, direction.clone().normalize()),
-    }
-  }, [from, to])
+  /** 겉면/관통을 따로 모아 둔다. 재질이 달라 인스턴스 묶음도 나뉜다. */
+  const groups = useMemo(() => {
+    const edge: RungItem[] = []
+    const through: RungItem[] = []
+    for (const item of items) (item.through ? through : edge).push(item)
+    return { edge, through }
+  }, [items])
 
-  /** 어디서 날아올지. 방위를 흩뜨려 사방에서 모여드는 그림을 만든다. */
-  const launch = useMemo(() => {
-    const angle = hash(seed) * Math.PI * 2
-    const lift = (hash(seed + 7) - 0.5) * 6
-    const distance = 7 + hash(seed + 13) * 5
-    return {
-      position: new Vector3(
-        Math.sin(angle) * distance,
-        target.middle.y + lift,
-        Math.cos(angle) * distance,
-      ),
-      quaternion: new Quaternion().setFromAxisAngle(
-        new Vector3(hash(seed + 3), hash(seed + 5), hash(seed + 11)).normalize(),
-        hash(seed + 17) * Math.PI * 2,
-      ),
-    }
-  }, [seed, target.middle.y])
+  /** 최종 위치·방향·길이와, 어디서 날아올지. 매 프레임 다시 계산하지 않는다. */
+  const plans = useMemo(() => {
+    const build = (list: RungItem[]) =>
+      list.map((item) => {
+        const middle = item.from.clone().add(item.to).multiplyScalar(0.5)
+        const direction = item.to.clone().sub(item.from)
+        const length = direction.length()
 
-  /**
-   * 시간을 벽시계가 아니라 **프레임 델타로 누적**한다.
-   *
-   * 브라우저는 백그라운드 탭에서 rAF를 멈추지만 벽시계는 계속 간다. 벽시계로 재면
-   * 탭을 옮겼다 돌아왔을 때 연출이 통째로 건너뛴다. 델타를 쌓으면 화면이 멈춘 동안
-   * 시간도 멈춰서, 돌아왔을 때 보던 자리부터 이어진다.
-   */
+        // 방위를 흩뜨려 사방에서 모여드는 그림을 만든다.
+        const angle = hash(item.seed) * Math.PI * 2
+        const lift = (hash(item.seed + 7) - 0.5) * 6
+        const distance = 7 + hash(item.seed + 13) * 5
+
+        return {
+          delayMs: item.delayMs,
+          length,
+          middle,
+          quaternion: new Quaternion().setFromUnitVectors(
+            UP,
+            direction.clone().normalize(),
+          ),
+          launchPosition: new Vector3(
+            Math.sin(angle) * distance,
+            middle.y + lift,
+            Math.cos(angle) * distance,
+          ),
+          launchQuaternion: new Quaternion().setFromAxisAngle(
+            new Vector3(
+              hash(item.seed + 3),
+              hash(item.seed + 5),
+              hash(item.seed + 11),
+            ).normalize(),
+            hash(item.seed + 17) * Math.PI * 2,
+          ),
+        }
+      })
+
+    return { edge: build(groups.edge), through: build(groups.through) }
+  }, [groups])
+
+  // 행렬을 조립할 임시 객체. 인스턴스마다 새로 만들면 GC가 매 프레임 돈다.
+  const dummy = useMemo(() => new Object3D(), [])
   const elapsedRef = useRef(0)
 
   useFrame((_, delta) => {
-    const mesh = ref.current
-    if (!mesh) return
-
     elapsedRef.current += delta * 1000
-    const t = instant ? 1 : clamp((elapsedRef.current - delayMs) / RUNG_FLY_MS, 0, 1)
-    const eased = easeOutCubic(t)
+    const elapsed = elapsedRef.current
 
-    mesh.position.lerpVectors(launch.position, target.middle, eased)
-    mesh.quaternion.slerpQuaternions(launch.quaternion, target.quaternion, eased)
-    mesh.scale.setScalar(t === 0 ? 0.001 : 0.35 + 0.65 * eased)
-    mesh.visible = t > 0
+    const apply = (mesh: InstancedMesh | null, list: typeof plans.edge) => {
+      if (!mesh) return
+
+      for (let i = 0; i < list.length; i += 1) {
+        const plan = list[i]
+        const t = instant ? 1 : clamp((elapsed - plan.delayMs) / RUNG_FLY_MS, 0, 1)
+        const eased = easeOutCubic(t)
+
+        dummy.position.lerpVectors(plan.launchPosition, plan.middle, eased)
+        dummy.quaternion.slerpQuaternions(plan.launchQuaternion, plan.quaternion, eased)
+
+        // 길이 1짜리 지오메트리를 실제 길이로 늘인다. 도착 전에는 짧게 보인다.
+        const grow = t === 0 ? 0.0001 : 0.35 + 0.65 * eased
+        dummy.scale.set(grow, plan.length * grow, grow)
+        dummy.updateMatrix()
+        mesh.setMatrixAt(i, dummy.matrix)
+      }
+
+      mesh.instanceMatrix.needsUpdate = true
+    }
+
+    apply(edgeRef.current, plans.edge)
+    apply(throughRef.current, plans.through)
   })
 
   return (
-    <mesh ref={ref} visible={false}>
-      <cylinderGeometry args={[through ? 0.026 : 0.032, through ? 0.026 : 0.032, target.length, 12]} />
-      {through ? (
-        // 관통선은 스스로 빛나게 해서 "이건 특별한 선"임을 알린다.
-        <meshStandardMaterial
-          color="#fbbf24"
-          emissive="#f59e0b"
-          emissiveIntensity={1.6}
-          metalness={0.6}
-          roughness={0.3}
-          toneMapped={false}
-        />
-      ) : (
-        <meshStandardMaterial color="#e8eaee" metalness={0.95} roughness={0.18} />
+    <group>
+      {plans.edge.length > 0 && (
+        <instancedMesh
+          ref={edgeRef}
+          args={[undefined, undefined, plans.edge.length]}
+          frustumCulled={false}
+        >
+          <cylinderGeometry args={[radius, radius, 1, 10]} />
+          <meshStandardMaterial color="#e8eaee" metalness={0.95} roughness={0.18} />
+        </instancedMesh>
       )}
-    </mesh>
+
+      {plans.through.length > 0 && (
+        <instancedMesh
+          ref={throughRef}
+          args={[undefined, undefined, plans.through.length]}
+          frustumCulled={false}
+        >
+          <cylinderGeometry args={[radius * 0.85, radius * 0.85, 1, 10]} />
+          {/* 관통선은 스스로 빛나게 해서 "이건 특별한 선"임을 알린다. */}
+          <meshStandardMaterial
+            color="#fbbf24"
+            emissive="#f59e0b"
+            emissiveIntensity={1.6}
+            metalness={0.6}
+            roughness={0.3}
+            toneMapped={false}
+          />
+        </instancedMesh>
+      )}
+    </group>
   )
 }
 
@@ -355,14 +428,14 @@ function Trail({
   delayMs,
   durationMs,
   instant,
-  thick,
+  radius,
 }: {
   points: Vector3[]
   color: string
   delayMs: number
   durationMs: number
   instant: boolean
-  thick: boolean
+  radius: number
 }) {
   /**
    * 코너를 곡선으로 잇지 않는다.
@@ -380,8 +453,8 @@ function Trail({
   }, [points])
 
   const geometry = useMemo(
-    () => new TubeGeometry(curve, Math.max(160, points.length * 34), thick ? 0.036 : 0.025, 7, false),
-    [curve, points.length, thick],
+    () => new TubeGeometry(curve, Math.max(180, points.length * 18), radius, 7, false),
+    [curve, points.length, radius],
   )
 
   const material = useMemo(
@@ -427,7 +500,7 @@ function Trail({
     <group>
       <mesh geometry={geometry} material={material} />
       <mesh ref={headRef} visible={false}>
-        <sphereGeometry args={[thick ? 0.075 : 0.055, 14, 14]} />
+        <sphereGeometry args={[radius * 2.4, 12, 12]} />
         <meshBasicMaterial color="#ffffff" toneMapped={false} />
       </mesh>
     </group>

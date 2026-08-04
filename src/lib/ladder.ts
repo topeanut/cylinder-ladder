@@ -47,7 +47,9 @@ const DENSITY: Record<
 > = {
   easy: { throughChance: 0, throughPerRow: 0, edgeChance: 0.42, extraRows: 2, minRows: 7, maxRows: 12 },
   normal: { throughChance: 0.3, throughPerRow: 1, edgeChance: 0.5, extraRows: 4, minRows: 8, maxRows: 18 },
-  hell: { throughChance: 0.85, throughPerRow: 2, edgeChance: 0.55, extraRows: 9, minRows: 14, maxRows: 26 },
+  // 지옥은 가로선을 다른 난이도의 열 배 가까이 깐다. 행 사이가 촘촘해지므로
+  // 가로선 굵기는 화면 쪽(LadderRig)에서 행 수를 보고 알아서 얇아진다.
+  hell: { throughChance: 0.92, throughPerRow: 3, edgeChance: 0.88, extraRows: 115, minRows: 110, maxRows: 170 },
 }
 
 /** 인원 수와 난이도에 맞춰 가로선을 놓을 행의 개수를 정한다. */

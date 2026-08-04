@@ -2,8 +2,14 @@ import { Vector3 } from 'three'
 import type { LadderPlan } from './ladder'
 import type { LadderGeometry } from './geometry'
 
-/** 경로가 그려지는 속도(월드 단위/초). */
-const TRAVEL_SPEED = 2.2
+/**
+ * 사다리를 처음부터 끝까지 타는 데 걸리는 시간(ms).
+ *
+ * 속도가 아니라 **시간**을 고정한다. 그래야 지옥처럼 경로가 열 배 길어져도
+ * 재생 시간이 그대로고, 대신 내려가는 속도가 저절로 빨라진다. 속도를 고정하면
+ * 지옥에서 1분 넘게 기다려야 한다.
+ */
+export const TARGET_PLAY_MS = 10000
 /** 사람마다 출발을 조금씩 어긋나게 해 여러 줄이 겹쳐 흐르게 한다. */
 const PERSON_STAGGER_MS = 130
 /** 트레일이 세로줄보다 얼마나 바깥에 떠 있는가. */
@@ -30,6 +36,10 @@ export function buildLanes(plan: LadderPlan, geo: LadderGeometry): Lane[] {
     return new Vector3(Math.sin(a) * lift, y, Math.cos(a) * lift)
   }
 
+  // 마지막 사람이 정확히 TARGET_PLAY_MS에 도착하도록 공통 소요 시간을 역산한다.
+  const lastStart = Math.max(0, (plan.traces.length - 1) * PERSON_STAGGER_MS)
+  const durationMs = Math.max(600, TARGET_PLAY_MS - lastStart)
+
   return plan.traces.map((trace, personIndex) => {
     const points: Vector3[] = []
 
@@ -43,17 +53,11 @@ export function buildLanes(plan: LadderPlan, geo: LadderGeometry): Lane[] {
       }
     }
 
-    // 길이를 알아야 "일정한 속도로 내려간다"는 느낌을 만들 수 있다.
-    let length = 0
-    for (let i = 1; i < points.length; i += 1) {
-      length += points[i].distanceTo(points[i - 1])
-    }
-
     return {
       personIndex,
       points,
       delayMs: personIndex * PERSON_STAGGER_MS,
-      durationMs: (length / TRAVEL_SPEED) * 1000,
+      durationMs,
     }
   })
 }

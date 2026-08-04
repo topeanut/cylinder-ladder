@@ -1,22 +1,45 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { MeshReflectorMaterial } from '@react-three/drei'
-import { ShaderMaterial } from 'three'
+import { MeshReflectorMaterial, useTexture } from '@react-three/drei'
+import { AdditiveBlending, RepeatWrapping, ShaderMaterial, SRGBColorSpace, Vector2 } from 'three'
+import type { Texture } from 'three'
 import type { Difficulty } from '../lib/types'
 import { CYLINDER_HEIGHT } from '../lib/geometry'
 
 /**
  * 난이도마다 다른 바닥.
  *
- * 배경 이미지를 쓰지 않고 셰이더로 그린다. 파일이 붙지 않아 로딩이 없고,
- * 시간에 따라 흐르는 애니메이션이 공짜로 따라온다. 두 셰이더 모두 값싼
- * 값잡음(value noise)을 여러 겹 쌓는 FBM 하나에서 나온다.
+ * 사진 텍스처(Poly Haven, CC0)를 깔고 그 위에 절차적 발광을 얹는다. 사진만으로는
+ * 흐르는 마그마를 만들 수 없고, 셰이더만으로는 실제 흙과 풀의 질감이 나오지 않는다.
+ * 둘을 겹쳐야 "진짜 땅 위에서 용암이 흐른다"가 된다.
+ *
+ * 텍스처는 저장소에 함께 담겨 있어 외부 네트워크에 의존하지 않는다.
  */
 
 const FLOOR_Y = -CYLINDER_HEIGHT / 2 - 1.1
 const FLOOR_SIZE = 90
+/** 사진 한 장을 바닥에 몇 번 반복해 깔 것인가. */
+const TILING = 26
 
-/** 두 셰이더가 공유하는 잡음 함수. */
+/** 내려받은 텍스처를 타일링·색공간까지 맞춘 뒤 돌려준다. */
+function usePreparedTextures(diffuse: string, normal: string) {
+  const [map, normalMap] = useTexture([diffuse, normal])
+
+  return useMemo(() => {
+    const prepare = (texture: Texture, srgb: boolean) => {
+      texture.wrapS = RepeatWrapping
+      texture.wrapT = RepeatWrapping
+      texture.repeat.set(TILING, TILING)
+      texture.anisotropy = 8
+      // 색으로 쓰는 맵만 sRGB다. 노멀맵은 방향 데이터라 변환하면 망가진다.
+      if (srgb) texture.colorSpace = SRGBColorSpace
+      return texture
+    }
+    return { map: prepare(map, true), normalMap: prepare(normalMap, false) }
+  }, [map, normalMap])
+}
+
+/** 두 발광 셰이더가 공유하는 잡음 함수. */
 const NOISE = /* glsl */ `
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -46,7 +69,7 @@ const NOISE = /* glsl */ `
   }
 `
 
-const GROUND_VERTEX = /* glsl */ `
+const GLOW_VERTEX = /* glsl */ `
   varying vec2 vUv;
   void main() {
     vUv = uv;
@@ -55,18 +78,16 @@ const GROUND_VERTEX = /* glsl */ `
 `
 
 /**
- * 용암.
+ * 사진 위에 얹는 마그마.
  *
- * 갈라진 지각(어두운 부분)과 그 틈으로 보이는 마그마(밝은 부분)를 잡음 하나로
- * 나눈다. 임계값 근처를 부드럽게 이어 붙이면 식어 굳은 가장자리가 생긴다.
+ * 이 면은 땅을 그리지 않는다. 갈라진 틈에 해당하는 부분만 남기고 나머지는 버려서
+ * (discard) 아래 깔린 탄 대지 사진 위로 빨간 빛만 더한다. 그래서 지각의 질감은
+ * 사진 그대로 남고 그 사이로 용암만 흐르는 그림이 된다.
  *
- * 색은 초록·파랑을 거의 0으로 눌러 순수한 빨강만 남긴다. 초록이 조금만 올라가도
- * 주황·노랑으로 새기 때문이다. 대신 빨강을 1보다 훨씬 크게 올려 블룸이 세게 번진다.
- *
- * 지옥처럼 보이는 건 밝기가 아니라 **대비**다. 지각을 거의 검정으로 떨어뜨리고
- * 그 사이 갈라진 틈만 시뻘겋게 타오르게 해야 용암이 용암으로 읽힌다.
+ * 색은 초록·파랑을 0에 가깝게 눌러 순수한 빨강만 남긴다. 초록이 조금만 올라가도
+ * 곧바로 주황·노랑으로 새기 때문이다.
  */
-const LAVA_FRAGMENT = /* glsl */ `
+const LAVA_GLOW = /* glsl */ `
   uniform float uTime;
   varying vec2 vUv;
   ${NOISE}
@@ -78,67 +99,50 @@ const LAVA_FRAGMENT = /* glsl */ `
     float flow = fbm(p + vec2(uTime * 0.06, uTime * -0.04));
     float crack = fbm(p * 0.6 + flow * 1.4 + vec2(0.0, uTime * 0.02));
 
-    // 경계를 좁혀 지각(검정)이 넓게 남고 갈라진 틈만 타오르게 한다.
+    // 좁게 잡아야 틈만 타오르고 나머지는 사진의 검은 지각이 남는다.
     float molten = smoothstep(0.50, 0.33, crack);
+    if (molten < 0.01) discard;
 
-    // 지각은 거의 검정. 아주 옅은 붉은 기만 남겨 완전히 죽은 면이 되지 않게 한다.
-    vec3 crustColor = mix(vec3(0.012, 0.004, 0.004), vec3(0.07, 0.012, 0.010), flow);
-    // 마그마는 초록·파랑을 0에 가깝게 눌러 노란빛이 섞이지 않게 한다.
-    vec3 magmaColor = mix(vec3(1.4, 0.03, 0.012), vec3(6.0, 0.16, 0.04), molten);
+    vec3 magma = mix(vec3(1.6, 0.03, 0.010), vec3(6.5, 0.18, 0.04), molten);
 
-    vec3 color = mix(crustColor, magmaColor, molten);
-
-    // 가장자리는 어둠에 잠기게 둔다. 검정이 넓을수록 틈의 빨강이 더 뜨거워 보인다.
-    float fade = 1.0 - smoothstep(0.16, 0.58, distance(vUv, vec2(0.5)));
-    gl_FragColor = vec4(color * (0.5 + fade * 0.85), 1.0);
+    // 가장자리로 갈수록 잦아들어 바닥 끝이 무한히 빛나 보이지 않게 한다.
+    float fade = 1.0 - smoothstep(0.16, 0.56, distance(vUv, vec2(0.5)));
+    gl_FragColor = vec4(magma * (0.45 + fade * 0.9), molten);
   }
 `
 
-/**
- * 풀밭.
- *
- * 그냥 초록 얼룩을 뿌리면 이끼처럼 보인다. 풀로 읽히려면 결이 필요해서,
- * 잡음의 x축을 크게 늘여 세로로 길쭉한 무늬(풀잎 다발)를 만든다. 여기에
- * 넓은 얼룩(빛과 그늘)을 겹쳐야 잔디밭처럼 보인다.
- */
-const GRASS_FRAGMENT = /* glsl */ `
+/** 풀밭 위에 얹는 햇빛 얼룩. 사진만 깔면 평평해 보여 밝고 어두운 결을 더한다. */
+const SUN_GLOW = /* glsl */ `
   uniform float uTime;
   varying vec2 vUv;
   ${NOISE}
 
   void main() {
-    vec2 p = (vUv - 0.5) * 30.0;
+    vec2 p = (vUv - 0.5) * 12.0;
 
-    // 바람에 눕는 결. 가로로만 아주 천천히 흐른다.
-    float sway = sin(p.y * 0.5 + uTime * 0.3) * 0.18;
+    // 구름 그림자가 아주 천천히 흘러가는 느낌
+    float patch = fbm(p * 0.5 + vec2(uTime * 0.02, uTime * 0.012));
+    float sun = smoothstep(0.45, 0.72, patch);
+    if (sun < 0.01) discard;
 
-    // 넓은 얼룩 = 빛과 그늘
-    float patch = fbm(p * 0.5 + vec2(sway, 0.0));
-    // 세로로 늘인 잡음 = 풀잎 다발
-    float blades = valueNoise(vec2(p.x * 14.0 + sway * 6.0, p.y * 2.2));
-    float fine = valueNoise(vec2(p.x * 34.0, p.y * 5.0));
-
-    // 연두. 빨강 성분을 함께 올려야 짙은 초록이 아니라 노란빛 도는 연두가 된다.
-    vec3 shade = vec3(0.20, 0.38, 0.09);
-    vec3 mid = vec3(0.42, 0.68, 0.16);
-    vec3 sunlit = vec3(0.78, 0.98, 0.36);
-
-    vec3 color = mix(shade, mid, patch);
-    color = mix(color, sunlit, blades * 0.55 + fine * 0.18);
-
-    float fade = 1.0 - smoothstep(0.24, 0.66, distance(vUv, vec2(0.5)));
-    gl_FragColor = vec4(color * (0.82 + fade * 0.5), 1.0);
+    float fade = 1.0 - smoothstep(0.2, 0.6, distance(vUv, vec2(0.5)));
+    // 연둣빛으로 밝히는 얇은 빛. 알파를 낮게 둬 사진을 덮지 않는다.
+    gl_FragColor = vec4(vec3(0.55, 0.85, 0.28) * (0.4 + fade * 0.6), sun * 0.5);
   }
 `
 
-function ShaderGround({ fragmentShader }: { fragmentShader: string }) {
+/** 사진 바닥 위 아주 살짝 띄워 얹는 발광 면. */
+function GlowOverlay({ fragmentShader }: { fragmentShader: string }) {
   const material = useMemo(
     () =>
       new ShaderMaterial({
         uniforms: { uTime: { value: 0 } },
-        vertexShader: GROUND_VERTEX,
+        vertexShader: GLOW_VERTEX,
         fragmentShader,
-        // 마그마가 1을 넘어야 블룸이 받아 번진다.
+        transparent: true,
+        depthWrite: false,
+        blending: AdditiveBlending,
+        // 색이 1을 넘어야 블룸이 받아 번진다.
         toneMapped: false,
       }),
     [fragmentShader],
@@ -153,15 +157,79 @@ function ShaderGround({ fragmentShader }: { fragmentShader: string }) {
   })
 
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, FLOOR_Y, 0]} material={material}>
+    <mesh
+      rotation={[-Math.PI / 2, 0, 0]}
+      position={[0, FLOOR_Y + 0.02, 0]}
+      material={material}
+    >
       <planeGeometry args={[FLOOR_SIZE, FLOOR_SIZE]} />
     </mesh>
   )
 }
 
+function PhotoGround({
+  diffuse,
+  normal,
+  tint,
+  roughness,
+  normalScale,
+}: {
+  diffuse: string
+  normal: string
+  tint: string
+  roughness: number
+  normalScale: number
+}) {
+  const { map, normalMap } = usePreparedTextures(diffuse, normal)
+  const scale = useMemo(() => new Vector2(normalScale, normalScale), [normalScale])
+
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, FLOOR_Y, 0]}>
+      <planeGeometry args={[FLOOR_SIZE, FLOOR_SIZE]} />
+      <meshStandardMaterial
+        map={map}
+        normalMap={normalMap}
+        normalScale={scale}
+        color={tint}
+        roughness={roughness}
+        metalness={0}
+      />
+    </mesh>
+  )
+}
+
 export function Ground({ difficulty }: { difficulty: Difficulty }) {
-  if (difficulty === 'hell') return <ShaderGround fragmentShader={LAVA_FRAGMENT} />
-  if (difficulty === 'easy') return <ShaderGround fragmentShader={GRASS_FRAGMENT} />
+  if (difficulty === 'hell') {
+    return (
+      <>
+        <PhotoGround
+          diffuse="/textures/scorched_diff.jpg"
+          normal="/textures/scorched_nor.jpg"
+          // 사진을 어둡게 눌러야 틈의 빨강이 더 뜨거워 보인다.
+          tint="#3a1410"
+          roughness={0.95}
+          normalScale={1.6}
+        />
+        <GlowOverlay fragmentShader={LAVA_GLOW} />
+      </>
+    )
+  }
+
+  if (difficulty === 'easy') {
+    return (
+      <>
+        <PhotoGround
+          diffuse="/textures/grass_diff.jpg"
+          normal="/textures/grass_nor.jpg"
+          // 사진의 짙은 초록을 연두 쪽으로 끌어올린다.
+          tint="#cfe86a"
+          roughness={0.85}
+          normalScale={1.2}
+        />
+        <GlowOverlay fragmentShader={SUN_GLOW} />
+      </>
+    )
+  }
 
   // 보통 난이도는 원기둥이 반사되는 매끈한 바닥을 그대로 쓴다.
   return (
