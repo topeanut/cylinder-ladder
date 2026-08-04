@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { CurvePath, LineCurve3, Vector3 } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
@@ -13,6 +13,10 @@ import { clamp } from '../lib/utils'
  * 관통 가로선을 타고 반대편으로 넘어가면 카메라도 반대편으로 돌아간다.
  * 전원이 동시에 내려갈 때는 방위를 건드리지 않는다. 여섯 명이 사방으로 흩어지는데
  * 카메라까지 돌면 아무것도 눈에 들어오지 않는다.
+ *
+ * 사용자가 화면을 직접 움직이면 그 순간부터 추적을 멈춘다. 보고 싶은 곳이 따로
+ * 있는데 카메라가 계속 끌고 가면 싸움이 된다. 한 번 손을 대면 이번 재생이 끝날
+ * 때까지 조종권은 사용자에게 있다.
  */
 
 /** 카메라가 머리보다 얼마나 위를 보는가. 진행 방향이 화면에 남도록 살짝 위다. */
@@ -67,14 +71,33 @@ export function CinematicCamera({
   const distance = useRef(11)
   const wasActive = useRef(false)
 
+  /**
+   * 사용자가 카메라를 직접 만졌는지.
+   *
+   * OrbitControls의 'start'는 포인터·휠 입력에서만 발생한다. 우리가 부르는
+   * controls.update()로는 발생하지 않으므로, "내가 만졌다"와 "코드가 움직였다"를
+   * 정확히 가를 수 있다.
+   */
+  const handedOver = useRef(false)
+
+  useEffect(() => {
+    if (!controls) return
+    const onUserGrab = () => {
+      handedOver.current = true
+    }
+    controls.addEventListener('start', onUserGrab)
+    return () => controls.removeEventListener('start', onUserGrab)
+  }, [controls])
+
   useFrame((_, delta) => {
     if (!controls) return
 
     if (!active) {
       elapsedRef.current = 0
       wasActive.current = false
-      // 재생이 끝나면 원래 눈높이로 천천히 돌아온다.
-      if (Math.abs(controls.target.y) > 0.01) {
+      // 재생이 끝났으면 원래 눈높이로 천천히 돌아온다.
+      // 단, 사용자가 직접 잡아 둔 시점이라면 그 자리를 그대로 존중한다.
+      if (!handedOver.current && Math.abs(controls.target.y) > 0.01) {
         controls.target.y += (0 - controls.target.y) * RETURN_EASE
         controls.update()
       }
@@ -86,8 +109,13 @@ export function CinematicCamera({
     if (!wasActive.current) {
       wasActive.current = true
       elapsedRef.current = 0
+      // 새 재생이 시작되면 조종권을 다시 카메라가 가져온다.
+      handedOver.current = false
       distance.current = clamp(camera.position.distanceTo(controls.target), 7, 13)
     }
+
+    // 사용자가 화면을 잡았으면 더 이상 끌고 가지 않는다.
+    if (handedOver.current) return
 
     elapsedRef.current += delta * 1000
     const t = clamp((elapsedRef.current - lane.delayMs) / Math.max(lane.durationMs, 1), 0, 1)

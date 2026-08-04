@@ -9,7 +9,7 @@ import type { LadderGeometry } from './geometry'
  * 재생 시간이 그대로고, 대신 내려가는 속도가 저절로 빨라진다. 속도를 고정하면
  * 지옥에서 1분 넘게 기다려야 한다.
  */
-export const TARGET_PLAY_MS = 10000
+export const TARGET_PLAY_MS = 7000
 /** 사람마다 출발을 조금씩 어긋나게 해 여러 줄이 겹쳐 흐르게 한다. */
 const PERSON_STAGGER_MS = 130
 /** 트레일이 세로줄보다 얼마나 바깥에 떠 있는가. */

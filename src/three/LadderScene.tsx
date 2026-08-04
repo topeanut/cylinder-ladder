@@ -32,15 +32,20 @@ const THEMES: Record<
   }
 > = {
   easy: {
-    // 한낮의 들판. 하늘은 <Sky>가 그리므로 배경색은 안개용으로만 쓰인다.
-    background: '#9fc9e8',
-    fog: [30, 70],
-    ambient: 1.35,
-    keyLight: '#fffbe8',
-    rimLights: ['#bef264', '#fde68a'],
-    lightformers: ['#ffffff', '#d9f99d', '#fef9c3'],
-    bloom: 0.55,
-    vignette: 0.26,
+    /*
+      해질 무렵의 들판.
+      한낮으로 두면 하늘이 너무 밝아 밝은 금속 세로줄이 배경에 묻힌다. 밝기가
+      아니라 대비 문제라, 태양을 지평선 쪽으로 내리고 환경광을 낮춰 사다리가
+      배경에서 떠오르게 한다.
+    */
+    background: '#6d8a9e',
+    fog: [22, 54],
+    ambient: 0.62,
+    keyLight: '#ffe6bd',
+    rimLights: ['#a3e635', '#fbbf24'],
+    lightformers: ['#ffe9c4', '#bef264', '#fcd34d'],
+    bloom: 0.7,
+    vignette: 0.52,
   },
   normal: {
     background: '#14141c',
@@ -102,7 +107,14 @@ export function LadderScene({
         비로소 "들판"으로 읽힌다.
       */}
       {difficulty === 'easy' && (
-        <Sky sunPosition={[12, 6, -18]} turbidity={5} rayleigh={1.4} distance={4000} />
+        <Sky
+          sunPosition={[9, 1.4, -15]}
+          turbidity={12}
+          rayleigh={3}
+          mieCoefficient={0.01}
+          mieDirectionalG={0.85}
+          distance={4000}
+        />
       )}
 
       <ambientLight intensity={theme.ambient} />
