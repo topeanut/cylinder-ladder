@@ -19,6 +19,8 @@ import { clamp } from './utils'
 export const CYLINDER_HEIGHT = 4.6
 /** 이웃한 세로줄 사이에 두고 싶은 간격. */
 const DESIRED_CHORD = 0.8
+/** 펼쳤을 때 사다리 전체가 차지할 수 있는 최대 가로 폭. */
+const FLAT_WIDTH = 8.6
 /** 인원이 적어도 원통이 납작해 보이지 않을 만큼의 굵기. */
 const MIN_RADIUS = 1.85
 const MAX_RADIUS = 4.4
@@ -33,6 +35,13 @@ export interface LadderGeometry {
   azimuth: (index: number) => number
   /** 세로줄 i 위, 높이 y인 점. */
   railPoint: (index: number, y: number) => Vector3
+  /** 원기둥을 갈라 평면으로 펼쳤을 때의 같은 점. */
+  flatPoint: (index: number, y: number) => Vector3
+  /**
+   * 원통과 평면 사이의 중간 배치.
+   * `unfold`가 0이면 원기둥, 1이면 평면이다.
+   */
+  blendPoint: (index: number, y: number, unfold: number) => Vector3
   /** 행 번호를 높이로. -1은 맨 위, rows는 맨 아래. */
   rowY: (row: number) => number
 }
@@ -50,16 +59,37 @@ export function computeGeometry(count: number, rows: number): LadderGeometry {
   const azimuth = (index: number) => (index * 2 * Math.PI) / safeCount
   const top = CYLINDER_HEIGHT / 2
 
+  /*
+    펼쳤을 때의 가로 간격.
+    원통 둘레를 그대로 펴면 인원이 많을 때 화면 밖으로 나가므로, 전체 폭이
+    FLAT_WIDTH를 넘지 않도록 줄인다.
+  */
+  const spacing = Math.min(
+    2 * radius * Math.sin(half),
+    FLAT_WIDTH / Math.max(safeCount - 1, 1),
+  )
+  const flatLeft = (-(safeCount - 1) * spacing) / 2
+
+  const railPoint = (index: number, y: number) => {
+    const a = azimuth(index)
+    return new Vector3(Math.sin(a) * radius, y, Math.cos(a) * radius)
+  }
+
+  const flatPoint = (index: number, y: number) =>
+    new Vector3(flatLeft + index * spacing, y, radius)
+
   return {
     count: safeCount,
     rows,
     radius,
     chord: 2 * radius * Math.sin(half),
     azimuth,
-    railPoint: (index, y) => {
-      const a = azimuth(index)
-      return new Vector3(Math.sin(a) * radius, y, Math.cos(a) * radius)
-    },
+    railPoint,
+    flatPoint,
+    blendPoint: (index, y, unfold) =>
+      unfold <= 0
+        ? railPoint(index, y)
+        : railPoint(index, y).lerp(flatPoint(index, y), unfold),
     rowY: (row) => {
       if (row < 0) return top
       if (row >= rows) return -top

@@ -43,6 +43,15 @@ export default function App() {
   /** 카메라가 원기둥 안에 있는지. 토큰이 바뀔 때만 카메라가 이동한다. */
   const [inside, setInside] = useState(false)
   const [insideToken, setInsideToken] = useState(0)
+  /**
+   * 전개 상태.
+   *
+   * `unfoldTarget`은 목표(0=원기둥, 1=평면)이고 3D 안에서 매 프레임 수렴한다.
+   * `settledUnfold`는 다 펴진 뒤의 값으로, 트레일 도형을 다시 굽는 기준이다.
+   * 트레일은 한 번 구운 고정 도형이라 중간 형태를 만들 수 없어 둘을 나눴다.
+   */
+  const [unfoldTarget, setUnfoldTarget] = useState(0)
+  const [settledUnfold, setSettledUnfold] = useState(0)
   /** 거꾸로 타서 주인을 찾아냈을 때 띄우는 모달. null이면 닫힌 상태. */
   const [personResult, setPersonResult] = useState<
     { name: string; index: number; isWin: boolean } | null
@@ -70,7 +79,10 @@ export default function App() {
     [app.people.length, app.plan],
   )
 
-  const lanes = useMemo(() => (app.plan ? buildLanes(app.plan, geo) : []), [app.plan, geo])
+  const lanes = useMemo(
+    () => (app.plan ? buildLanes(app.plan, geo, settledUnfold) : []),
+    [app.plan, geo, settledUnfold],
+  )
 
   const playDurationMs = useMemo(
     () =>
@@ -323,6 +335,9 @@ export default function App() {
           difficulty={app.difficulty}
           inside={inside}
           insideToken={insideToken}
+          unfoldTarget={unfoldTarget}
+          settledUnfold={settledUnfold}
+          onUnfoldSettle={setSettledUnfold}
           running={running}
           playDurationMs={playDurationMs}
           onPlayEnd={handlePlayEnd}
@@ -348,16 +363,27 @@ export default function App() {
         )}
 
         {app.people.length > 0 && (
-          <button
-            type="button"
-            onClick={() => {
-              setInside((value) => !value)
-              setInsideToken((token) => token + 1)
-            }}
-            className="absolute top-3 right-3 z-10 rounded-xl border border-neutral-700 bg-neutral-950/80 px-3 py-2 text-xs font-bold text-neutral-200 backdrop-blur transition-colors hover:border-amber-500 hover:text-amber-400"
-          >
-            {inside ? '밖에서 보기' : '원기둥 안에서 보기'}
-          </button>
+          <div className="absolute top-3 right-3 z-10 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setUnfoldTarget((value) => (value === 0 ? 1 : 0))}
+              disabled={inside}
+              className="rounded-xl border border-neutral-700 bg-neutral-950/80 px-3 py-2 text-xs font-bold text-neutral-200 backdrop-blur transition-colors hover:border-amber-500 hover:text-amber-400 disabled:opacity-40"
+            >
+              {unfoldTarget === 0 ? '평면으로 펼치기' : '원기둥으로 말기'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setInside((value) => !value)
+                setInsideToken((token) => token + 1)
+              }}
+              disabled={unfoldTarget !== 0}
+              className="rounded-xl border border-neutral-700 bg-neutral-950/80 px-3 py-2 text-xs font-bold text-neutral-200 backdrop-blur transition-colors hover:border-amber-500 hover:text-amber-400 disabled:opacity-40"
+            >
+              {inside ? '밖에서 보기' : '안에서 보기'}
+            </button>
+          </div>
         )}
 
         <WinnerBanner winners={winnerNames} token={bannerToken} />

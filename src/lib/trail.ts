@@ -49,12 +49,23 @@ export interface Lane {
  * 화면(LadderRig)과 재생 시간 계산(App)이 같은 결과를 써야 소리·색종이 타이밍이
  * 그림과 맞는다. 그래서 계산을 여기 한 곳에 둔다.
  */
-export function buildLanes(plan: LadderPlan, geo: LadderGeometry): Lane[] {
-  const lift = geo.radius + TRAIL_LIFT
+export function buildLanes(
+  plan: LadderPlan,
+  geo: LadderGeometry,
+  /** 0이면 원기둥 위, 1이면 펼친 평면 위에 그린다. */
+  unfold = 0,
+): Lane[] {
+  const lift = TRAIL_LIFT / Math.max(geo.radius, 0.001)
 
+  /**
+   * 세로줄보다 아주 살짝 바깥에 띄운다.
+   * 원기둥에서는 반지름을 키우고, 펼친 평면에서는 카메라 쪽(z)으로 민다.
+   */
   const pointOn = (railIndex: number, y: number) => {
-    const a = geo.azimuth(railIndex)
-    return new Vector3(Math.sin(a) * lift, y, Math.cos(a) * lift)
+    const base = geo.blendPoint(railIndex, y, unfold)
+    return unfold < 0.5
+      ? base.multiply(new Vector3(1 + lift, 1, 1 + lift))
+      : base.add(new Vector3(0, 0, TRAIL_LIFT))
   }
 
   // 마지막 사람이 정확히 TARGET_PLAY_MS에 도착하도록 공통 소요 시간을 역산한다.

@@ -1,4 +1,4 @@
-import { Fragment, memo, useEffect, useMemo, useRef } from 'react'
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Html } from '@react-three/drei'
@@ -11,6 +11,7 @@ import {
   ShaderMaterial,
   TubeGeometry,
   Vector3,
+  type Group,
   type InstancedMesh,
   type Mesh,
   type MeshBasicMaterial,
@@ -51,6 +52,11 @@ export interface LadderRigProps {
   instant: boolean
   /** 카메라가 원기둥 안에 있는지. 안에서는 바깥면에 붙은 이름표가 보이지 않는다. */
   inside: boolean
+  /** 펼침 목표(0=원기둥, 1=평면). 실제 전개는 매 프레임 이 값으로 수렴한다. */
+  unfoldTarget: number
+  /** 전개가 끝난 뒤의 배치. 트레일 도형은 이 값에서만 다시 굽는다. */
+  settledUnfold: number
+  onUnfoldSettle: (value: number) => void
   onSelectPerson: (index: number) => void
   /** 결과 칸을 눌렀을 때. 거꾸로 타기의 출발점이 된다. */
   onSelectSlot: (slotIndex: number) => void
@@ -67,6 +73,9 @@ function LadderRigImpl({
   reverse,
   instant,
   inside,
+  unfoldTarget,
+  settledUnfold,
+  onUnfoldSettle,
   onSelectPerson,
   onSelectSlot,
 }: LadderRigProps) {
@@ -88,7 +97,7 @@ function LadderRigImpl({
   const rungRadius = rows > 40 ? 0.013 : 0.032
   const trailRadius = rows > 40 ? 0.017 : 0.025
 
-  /** 가로선 하나하나의 최종 위치. 인스턴싱에 넘길 평평한 목록으로 미리 편다. */
+  /** 가로선 하나하나. 인스턴싱에 넘길 평평한 목록으로 미리 편다. */
   const rungItems = useMemo<RungItem[]>(() => {
     if (!plan) return []
 
@@ -98,8 +107,9 @@ function LadderRigImpl({
           rung.kind === 'edge' ? [rung.gap, mod(rung.gap + 1, count)] : [rung.from, rung.to]
 
         return {
-          from: geo.railPoint(a, geo.rowY(row)),
-          to: geo.railPoint(b, geo.rowY(row)),
+          railA: a,
+          railB: b,
+          y: geo.rowY(row),
           through: rung.kind === 'through',
           delayMs: instant ? 0 : rungDelayMs(row, orderInRow),
           seed: row * 31 + a * 17 + b * 7,
@@ -108,13 +118,55 @@ function LadderRigImpl({
     )
   }, [plan, geo, count, instant])
 
+  /* ── 전개 ─────────────────────────────────────────────────
+     세로줄과 이름표는 매 프레임 자리를 옮겨 부드럽게 펴진다.
+     트레일만은 한 번 구운 고정 도형이라 중간 형태를 만들 수 없어서, 펼치는
+     동안 감췄다가 끝난 자리에서 다시 굽는다(settledUnfold).             */
+
+  const railsRef = useRef<Array<Mesh | null>>([])
+  const labelsRef = useRef<Array<Group | null>>([])
+  const unfoldRef = useRef(unfoldTarget)
+  const settleRef = useRef(onUnfoldSettle)
+  settleRef.current = onUnfoldSettle
+
+  const registerRail = useCallback((index: number, node: Mesh | null) => {
+    railsRef.current[index] = node
+  }, [])
+  const registerLabel = useCallback((index: number, node: Group | null) => {
+    labelsRef.current[index] = node
+  }, [])
+
+  useFrame(() => {
+    const current = unfoldRef.current
+    const next = current + (unfoldTarget - current) * 0.1
+    const done = Math.abs(unfoldTarget - next) < 0.004
+    unfoldRef.current = done ? unfoldTarget : next
+
+    for (let i = 0; i < count; i += 1) {
+      const rail = railsRef.current[i]
+      if (rail) rail.position.copy(geo.blendPoint(i, 0, unfoldRef.current))
+
+      const label = labelsRef.current[i]
+      if (label) {
+        // 위·아래 라벨을 한 쌍으로 묶어 두므로 x·z만 맞춰 주면 된다.
+        const anchor = geo.blendPoint(i, 0, unfoldRef.current)
+        label.position.set(anchor.x, 0, anchor.z)
+      }
+    }
+
+    if (done && settledUnfold !== unfoldTarget) settleRef.current(unfoldTarget)
+  })
+
+  /** 전개 중에는 트레일을 감춘다. 중간 형태를 만들 수 없기 때문이다. */
+  const folding = settledUnfold !== unfoldTarget
+
   if (count === 0) return null
 
   return (
     <group>
       {/* 세로줄 */}
       {people.map((person, index) => (
-        <mesh key={person.id} position={geo.railPoint(index, 0)}>
+        <mesh key={person.id} ref={(node) => registerRail(index, node)}>
           <cylinderGeometry args={[0.024, 0.024, CYLINDER_HEIGHT, 12]} />
           <meshStandardMaterial color="#c9ced6" metalness={0.98} roughness={0.24} />
         </mesh>
@@ -127,11 +179,13 @@ function LadderRigImpl({
           items={rungItems}
           radius={rungRadius}
           instant={instant}
+          geo={geo}
+          unfoldRef={unfoldRef}
         />
       )}
 
       {/* 지나간 길 */}
-      {plan && showTrails && (
+      {plan && showTrails && !folding && (
         <Fragment key={`trail-${playToken}-${activeIndex ?? 'all'}-${reverse ? 'up' : 'down'}`}>
           {lanes
             .filter((lane) => activeIndex === null || lane.personIndex === activeIndex)
@@ -154,63 +208,58 @@ function LadderRigImpl({
       {/*
         이름표와 결과표는 원기둥 바깥면에 붙어 있다. 카메라가 안으로 들어가면
         뒷면만 보이므로 아예 감춘다. 안에서는 구조 자체가 볼거리다.
+
+        위·아래 라벨을 사람별 그룹으로 묶어 두면, 전개할 때 그룹 하나만 옮겨도
+        둘이 같이 따라온다.
       */}
       {!inside &&
-        people.map((person, index) => (
-        <FacingLabel
-          key={person.id}
-          azimuth={geo.azimuth(index)}
-          position={geo.railPoint(index, top + 0.5)}
-        >
-          <button
-            type="button"
-            onClick={() => onSelectPerson(index)}
-            className={cn(
-              'flex max-w-[9rem] min-w-[4.5rem] items-center justify-center rounded-xl border-2 px-3 py-1.5',
-              'bg-neutral-950/85 text-[13px] font-bold whitespace-nowrap text-neutral-50 backdrop-blur',
-              'shadow-lg transition-transform hover:scale-105',
-              activeIndex !== null && activeIndex !== index && 'opacity-40',
-            )}
-            style={{ borderColor: personColor(index) }}
-          >
-            <span className="truncate">{person.name}</span>
-          </button>
-        </FacingLabel>
-        ))}
+        people.map((person, index) => {
+          const isWin = plan?.prizeSlots[index] ?? false
 
-      {/*
-        결과 칸은 처음부터 전부 보인다.
-        실제 사다리타기도 아래 결과는 다 보인 채로 시작한다. 긴장감은 "저기 뭐가
-        있나"가 아니라 "내가 저기로 가나"에서 나온다. 그래서 당첨 칸은 감추는 대신
-        멀리서도 보이게 빛낸다.
-      */}
-      {plan &&
-        !inside &&
-        plan.prizeSlots.map((isWin, index) => (
-          <Fragment key={index}>
-            {isWin && <PrizeBeacon position={geo.railPoint(index, -top - 0.12)} />}
-            <FacingLabel
-              azimuth={geo.azimuth(index)}
-              position={geo.railPoint(index, -top - 0.62)}
-            >
-              <button
-                type="button"
-                onClick={() => onSelectSlot(index)}
-                title="이 칸의 주인을 거꾸로 찾아 올라갑니다"
-                className={cn(
-                  'flex min-w-[3.5rem] items-center justify-center rounded-xl px-3 py-1.5',
-                  'text-[13px] font-extrabold whitespace-nowrap backdrop-blur',
-                  'transition-transform hover:scale-105',
-                  isWin
-                    ? 'bg-amber-400 text-neutral-950 shadow-[0_0_28px_rgba(251,191,36,0.9)]'
-                    : 'bg-neutral-800/70 text-neutral-500',
-                )}
-              >
-                {isWin ? '당첨' : '꽝'}
-              </button>
-            </FacingLabel>
-          </Fragment>
-        ))}
+          return (
+            <group key={person.id} ref={(node) => registerLabel(index, node)}>
+              <FacingLabel azimuth={geo.azimuth(index)} position={[0, top + 0.5, 0]}>
+                <button
+                  type="button"
+                  onClick={() => onSelectPerson(index)}
+                  className={cn(
+                    'flex max-w-[9rem] min-w-[4.5rem] items-center justify-center rounded-xl border-2 px-3 py-1.5',
+                    'bg-neutral-950/85 text-[13px] font-bold whitespace-nowrap text-neutral-50 backdrop-blur',
+                    'shadow-lg transition-transform hover:scale-105',
+                    activeIndex !== null && activeIndex !== index && 'opacity-40',
+                  )}
+                  style={{ borderColor: personColor(index) }}
+                >
+                  <span className="truncate">{person.name}</span>
+                </button>
+              </FacingLabel>
+
+              {plan && (
+                <>
+                  {isWin && <PrizeBeacon position={[0, -top - 0.12, 0]} />}
+                  <FacingLabel azimuth={geo.azimuth(index)} position={[0, -top - 0.62, 0]}>
+                    <button
+                      type="button"
+                      onClick={() => onSelectSlot(index)}
+                      title="이 칸의 주인을 거꾸로 찾아 올라갑니다"
+                      className={cn(
+                        'flex min-w-[3.5rem] items-center justify-center rounded-xl px-3 py-1.5',
+                        'text-[13px] font-extrabold whitespace-nowrap backdrop-blur',
+                        'transition-transform hover:scale-105',
+                        isWin
+                          ? 'bg-amber-400 text-neutral-950 shadow-[0_0_28px_rgba(251,191,36,0.9)]'
+                          : 'bg-neutral-800/70 text-neutral-500',
+                      )}
+                    >
+                      {isWin ? '당첨' : '꽝'}
+                    </button>
+                  </FacingLabel>
+                </>
+              )}
+            </group>
+          )
+        })}
+
     </group>
   )
 }
@@ -224,7 +273,7 @@ function LadderRigImpl({
  * 돌리지 않아도 "저쪽 어딘가에 당첨이 있다"는 감각을 준다. 블룸이 이 발광을
  * 받아 번지면서 멀리서도 눈에 띈다.
  */
-function PrizeBeacon({ position }: { position: Vector3 }) {
+function PrizeBeacon({ position }: { position: [number, number, number] }) {
   const ref = useRef<Mesh>(null)
 
   useFrame(() => {
@@ -247,8 +296,10 @@ function PrizeBeacon({ position }: { position: Vector3 }) {
 /* ── 가로선 ─────────────────────────────────────────────────── */
 
 interface RungItem {
-  from: Vector3
-  to: Vector3
+  /** 잇는 두 세로줄. 전개에 따라 위치가 바뀌므로 좌표가 아니라 번호로 들고 있는다. */
+  railA: number
+  railB: number
+  y: number
   /** 원통 속을 관통하는 선인지. 겉면 가로선과 다르게 칠해 눈에 띄게 한다. */
   through: boolean
   delayMs: number
@@ -269,10 +320,15 @@ function Rungs({
   items,
   radius,
   instant,
+  geo,
+  unfoldRef,
 }: {
   items: RungItem[]
   radius: number
   instant: boolean
+  geo: LadderGeometry
+  /** 매 프레임 갱신되는 전개 진행도. Rig가 하나만 들고 있고 여기서 읽는다. */
+  unfoldRef: { current: number }
 }) {
   const edgeRef = useRef<InstancedMesh>(null)
   const throughRef = useRef<InstancedMesh>(null)
@@ -285,30 +341,20 @@ function Rungs({
     return { edge, through }
   }, [items])
 
-  /** 최종 위치·방향·길이와, 어디서 날아올지. 매 프레임 다시 계산하지 않는다. */
+  /** 어디서 날아올지. 최종 위치는 전개에 따라 바뀌므로 매 프레임 다시 구한다. */
   const plans = useMemo(() => {
     const build = (list: RungItem[]) =>
       list.map((item) => {
-        const middle = item.from.clone().add(item.to).multiplyScalar(0.5)
-        const direction = item.to.clone().sub(item.from)
-        const length = direction.length()
-
         // 방위를 흩뜨려 사방에서 모여드는 그림을 만든다.
         const angle = hash(item.seed) * Math.PI * 2
         const lift = (hash(item.seed + 7) - 0.5) * 6
         const distance = 7 + hash(item.seed + 13) * 5
 
         return {
-          delayMs: item.delayMs,
-          length,
-          middle,
-          quaternion: new Quaternion().setFromUnitVectors(
-            UP,
-            direction.clone().normalize(),
-          ),
+          item,
           launchPosition: new Vector3(
             Math.sin(angle) * distance,
-            middle.y + lift,
+            item.y + lift,
             Math.cos(angle) * distance,
           ),
           launchQuaternion: new Quaternion().setFromAxisAngle(
@@ -325,28 +371,44 @@ function Rungs({
     return { edge: build(groups.edge), through: build(groups.through) }
   }, [groups])
 
-  // 행렬을 조립할 임시 객체. 인스턴스마다 새로 만들면 GC가 매 프레임 돈다.
+  // 행렬을 조립할 임시 객체들. 인스턴스마다 새로 만들면 GC가 매 프레임 돈다.
   const dummy = useMemo(() => new Object3D(), [])
+  const a = useMemo(() => new Vector3(), [])
+  const b = useMemo(() => new Vector3(), [])
+  const middle = useMemo(() => new Vector3(), [])
+  const direction = useMemo(() => new Vector3(), [])
+  const aim = useMemo(() => new Quaternion(), [])
   const elapsedRef = useRef(0)
 
   useFrame((_, delta) => {
     elapsedRef.current += delta * 1000
     const elapsed = elapsedRef.current
+    const unfold = unfoldRef.current
 
     const apply = (mesh: InstancedMesh | null, list: typeof plans.edge) => {
       if (!mesh) return
 
       for (let i = 0; i < list.length; i += 1) {
         const plan = list[i]
-        const t = instant ? 1 : clamp((elapsed - plan.delayMs) / RUNG_FLY_MS, 0, 1)
+        const { item } = plan
+
+        // 전개 중에는 양 끝 세로줄이 움직이므로 최종 자리를 매번 다시 구한다.
+        a.copy(geo.blendPoint(item.railA, item.y, unfold))
+        b.copy(geo.blendPoint(item.railB, item.y, unfold))
+        middle.copy(a).add(b).multiplyScalar(0.5)
+        direction.copy(b).sub(a)
+        const length = direction.length()
+        aim.setFromUnitVectors(UP, direction.normalize())
+
+        const t = instant ? 1 : clamp((elapsed - item.delayMs) / RUNG_FLY_MS, 0, 1)
         const eased = easeOutCubic(t)
 
-        dummy.position.lerpVectors(plan.launchPosition, plan.middle, eased)
-        dummy.quaternion.slerpQuaternions(plan.launchQuaternion, plan.quaternion, eased)
+        dummy.position.lerpVectors(plan.launchPosition, middle, eased)
+        dummy.quaternion.slerpQuaternions(plan.launchQuaternion, aim, eased)
 
         // 길이 1짜리 지오메트리를 실제 길이로 늘인다. 도착 전에는 짧게 보인다.
         const grow = t === 0 ? 0.0001 : 0.35 + 0.65 * eased
-        dummy.scale.set(grow, plan.length * grow, grow)
+        dummy.scale.set(grow, length * grow, grow)
         dummy.updateMatrix()
         mesh.setMatrixAt(i, dummy.matrix)
       }
@@ -542,7 +604,7 @@ function FacingLabel({
   children,
 }: {
   azimuth: number
-  position: Vector3
+  position: [number, number, number]
   children: ReactNode
 }) {
   const divRef = useRef<HTMLDivElement>(null)
