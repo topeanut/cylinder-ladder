@@ -11,6 +11,19 @@
   --font-sans:
     'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont,
     system-ui, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+
+  --animate-pop-in: pop-in 0.45s cubic-bezier(0.22, 1.2, 0.36, 1) both;
+
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.86) translateY(-8px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
 }
 
 html {

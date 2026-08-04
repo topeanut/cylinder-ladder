@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Controls } from './components/Controls'
 import { MathNotes } from './components/MathNotes'
+import { MobileBar } from './components/MobileBar'
 import { PeopleEditor } from './components/PeopleEditor'
 import { ResultBoard } from './components/ResultBoard'
 import { Sidebar } from './components/Sidebar'
+import { WinnerBanner } from './components/WinnerBanner'
 import { useAppState } from './hooks/useAppState'
 import { useConfetti } from './hooks/useConfetti'
 import { useSound } from './hooks/useSound'
@@ -28,6 +30,12 @@ export default function App() {
    * 각자의 화면 사정이지, 공유해야 할 상태가 아니기 때문이다.
    */
   const [revealedPeople, setRevealedPeople] = useState<Set<number>>(new Set())
+  /** 모바일 바텀시트. 데스크톱에서는 늘 보이므로 이 값을 쓰지 않는다. */
+  const [sheetOpen, setSheetOpen] = useState(false)
+  /** 첫 프레임을 그릴 준비가 됐는지. 그 전까지는 로딩 표시를 덮어 둔다. */
+  const [sceneReady, setSceneReady] = useState(false)
+  /** 당첨 배너를 다시 띄우는 토큰. */
+  const [bannerToken, setBannerToken] = useState(0)
 
   /**
    * 공유 링크로 막 들어온 경우에는 애니메이션 없이 최종 상태를 보여 준다.
@@ -69,6 +77,14 @@ export default function App() {
         : revealedPeople,
     [app.revealed, app.people, revealedPeople],
   )
+
+  // WebGL을 못 쓰는 기기에서는 onCreated가 끝내 오지 않는다. 그런 화면을 영원히
+  // 스피너로 덮어 두면 안 되므로, 일정 시간이 지나면 그냥 걷어낸다.
+  useEffect(() => {
+    if (sceneReady) return
+    const timer = window.setTimeout(() => setSceneReady(true), 4000)
+    return () => window.clearTimeout(timer)
+  }, [sceneReady])
 
   /* ── 가로선이 꽂히는 소리 ─────────────────────────────────── */
 
@@ -130,6 +146,7 @@ export default function App() {
     app.reveal()
     // 이번 판의 당첨자를 이력에 남긴다. 다음 판부터 그만큼 덜 뽑힌다.
     app.recordWins(app.plan.winners.map((index) => app.people[index]?.name).filter(Boolean))
+    setBannerToken((token) => token + 1)
     playWin()
     fireConfetti()
   }, [activeIndex, app, fireConfetti, playWin])
@@ -171,9 +188,25 @@ export default function App() {
   const shareUrl = useMemo(() => buildShareUrl(shareable, true), [shareable])
   const sealedUrl = useMemo(() => buildShareUrl(shareable, false), [shareable])
 
+  /** 배너에 띄울 이름들. 결과가 공개된 뒤에만 의미가 있다. */
+  const winnerNames = useMemo(
+    () =>
+      app.plan && app.revealed
+        ? app.plan.winners.map((index) => app.people[index]?.name).filter(Boolean)
+        : [],
+    [app.plan, app.revealed, app.people],
+  )
+
   return (
-    <div className="flex min-h-svh flex-col bg-neutral-950 text-neutral-50 min-[900px]:h-svh min-[900px]:flex-row min-[900px]:overflow-hidden">
-      <Sidebar muted={muted} onToggleMuted={toggleMuted}>
+    // 모바일에서는 3D가 화면 전체를 차지하고 설정 시트가 그 위를 덮는다.
+    // 데스크톱에서는 좌측 칼럼 + 오른쪽 3D의 두 칸 배치가 된다.
+    <div className="relative h-svh overflow-hidden bg-neutral-950 text-neutral-50 min-[900px]:flex">
+      <Sidebar
+        muted={muted}
+        open={sheetOpen}
+        onToggleMuted={toggleMuted}
+        onClose={() => setSheetOpen(false)}
+      >
         <Controls
           phase={phase}
           peopleCount={app.people.length}
@@ -215,36 +248,54 @@ export default function App() {
         <MathNotes />
       </Sidebar>
 
-      <main className="relative min-h-[60svh] flex-1 min-[900px]:h-svh">
-        {app.people.length === 0 ? (
-          <p className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-neutral-400">
-            왼쪽에서 이름을 2명 이상 추가하면
-            <br />
-            원기둥 사다리가 세워집니다.
-          </p>
-        ) : (
-          <LadderScene
-            running={running}
-            playDurationMs={playDurationMs}
-            onPlayEnd={handlePlayEnd}
-            people={app.people}
-            plan={app.plan}
-            geo={geo}
-            lanes={lanes}
-            buildToken={app.seed ?? 0}
-            playToken={playToken}
-            activeIndex={activeIndex}
-            instant={instant}
-            onSelectPerson={handleSelectPerson}
-          />
+      <main className="absolute inset-0 min-[900px]:relative min-[900px]:h-svh min-[900px]:flex-1">
+        <LadderScene
+          running={running}
+          playDurationMs={playDurationMs}
+          onPlayEnd={handlePlayEnd}
+          onReady={() => setSceneReady(true)}
+          people={app.people}
+          plan={app.plan}
+          geo={geo}
+          lanes={lanes}
+          buildToken={app.seed ?? 0}
+          playToken={playToken}
+          activeIndex={activeIndex}
+          instant={instant}
+          onSelectPerson={handleSelectPerson}
+        />
+
+        {/* WebGL이 붙기 전의 검은 화면을 덮는다 */}
+        {!sceneReady && (
+          <div className="absolute inset-0 flex items-center justify-center bg-neutral-950">
+            <span className="size-8 animate-spin rounded-full border-2 border-neutral-700 border-t-amber-500" />
+          </div>
         )}
 
-        <p className="pointer-events-none absolute inset-x-0 bottom-3 text-center text-xs text-neutral-400">
-          {phase === 'edit'
-            ? '왼쪽에서 사다리를 만들어 보세요'
-            : '끌어서 돌리고, 휠로 확대·축소할 수 있습니다'}
+        <WinnerBanner winners={winnerNames} token={bannerToken} />
+
+        {app.people.length === 0 && (
+          <p className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 px-8 text-center text-sm leading-relaxed text-neutral-400">
+            이름을 2명 이상 추가하면
+            <br />
+            여기에 원기둥 사다리가 세워집니다.
+          </p>
+        )}
+
+        <p className="pointer-events-none absolute inset-x-0 bottom-24 text-center text-xs text-neutral-500 min-[900px]:bottom-3">
+          {app.people.length === 0
+            ? '아래 버튼으로 이름을 추가해 보세요'
+            : '끌어서 돌리고, 휠·손가락 두 개로 확대·축소할 수 있습니다'}
         </p>
       </main>
+
+      <MobileBar
+        phase={phase}
+        peopleCount={app.people.length}
+        onRoll={handleRoll}
+        onPlay={handlePlay}
+        onOpenSettings={() => setSheetOpen(true)}
+      />
     </div>
   )
 }

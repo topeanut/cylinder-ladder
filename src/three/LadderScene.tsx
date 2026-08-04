@@ -4,6 +4,7 @@ import { Environment, Lightformer, MeshReflectorMaterial, OrbitControls } from '
 import { Bloom, EffectComposer, Vignette } from '@react-three/postprocessing'
 import { CYLINDER_HEIGHT } from '../lib/geometry'
 import { CinematicCamera } from './CinematicCamera'
+import { GhostRig } from './GhostRig'
 import { LadderRig, type LadderRigProps } from './LadderRig'
 
 /**
@@ -20,12 +21,15 @@ interface LadderSceneProps extends LadderRigProps {
   onPlayEnd: () => void
   /** 재생이 끝나는 데 걸리는 시간(ms). 사람 수와 경로 길이에 따라 달라진다. */
   playDurationMs: number
+  /** WebGL 컨텍스트가 준비되어 첫 프레임을 그릴 수 있게 된 순간. */
+  onReady: () => void
 }
 
 export function LadderScene({
   running,
   onPlayEnd,
   playDurationMs,
+  onReady,
   ...rig
 }: LadderSceneProps) {
   // 다크 전용이다. 발광·반사·블룸이 전부 어두운 배경을 전제로 맞춰져 있다.
@@ -37,7 +41,8 @@ export function LadderScene({
     <Canvas
       dpr={[1, 2]}
       camera={{ position: [0, 1.2, 11.2], fov: 44 }}
-      gl={{ antialias: true }}
+      gl={{ antialias: true, preserveDrawingBuffer: true }}
+      onCreated={onReady}
     >
       <color attach="background" args={[background]} />
       <fog attach="fog" args={[background, 16, 34]} />
@@ -72,7 +77,8 @@ export function LadderScene({
           />
         </Environment>
 
-        <LadderRig {...rig} />
+        {/* 명단이 비었으면 실제 사다리 대신 흐릿한 원기둥이 천천히 돈다 */}
+        {rig.people.length === 0 ? <GhostRig /> : <LadderRig {...rig} />}
 
         {/* 재생이 실제로 끝났는지는 그린 프레임을 세어 판단한다 */}
         <PlayClock active={running} durationMs={playDurationMs} onEnd={onPlayEnd} />
@@ -110,7 +116,7 @@ export function LadderScene({
         maxDistance={18}
         minPolarAngle={Math.PI * 0.18}
         maxPolarAngle={Math.PI * 0.72}
-        autoRotate={!rig.instant && !running}
+        autoRotate={rig.people.length === 0 || (!rig.instant && !running)}
         autoRotateSpeed={0.55}
         enableDamping
         dampingFactor={0.08}
