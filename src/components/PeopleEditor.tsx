@@ -133,9 +133,17 @@ function PeopleEditorImpl({
         </Button>
       </form>
 
-      <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
-        여러 줄을 한꺼번에 붙여넣으면 한 줄에 한 명씩 자동으로 추가됩니다.
-      </p>
+      <div className="mt-2 flex flex-col gap-1 text-xs leading-relaxed text-neutral-400">
+        <p>여러 줄을 한꺼번에 붙여넣으면 한 줄에 한 명씩 자동으로 추가됩니다.</p>
+        {people.length > 0 && (
+          <p>
+            <span className="text-amber-500">★</span> 옆 숫자는{' '}
+            <strong className="text-neutral-300">지금까지의 당첨 횟수</strong>입니다. 직접
+            고칠 수 있고, 올릴수록 그 사람이 뽑힐 확률이 낮아집니다. 오른쪽 %가 이번 판의
+            당첨 확률입니다.
+          </p>
+        )}
+      </div>
 
       {people.length > 0 && (
         <DndContext

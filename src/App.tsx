@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Controls } from './components/Controls'
+import { MathNotes } from './components/MathNotes'
 import { PeopleEditor } from './components/PeopleEditor'
 import { ResultBoard } from './components/ResultBoard'
 import { Sidebar } from './components/Sidebar'
@@ -210,6 +211,8 @@ export default function App() {
           onClear={app.clearPeople}
           onWinsChange={app.setWinsFor}
         />
+
+        <MathNotes />
       </Sidebar>
 
       <main className="relative min-h-[60svh] flex-1 min-[900px]:h-svh">
