@@ -452,8 +452,18 @@ function Trail({
     return path
   }, [points])
 
+  /**
+   * 튜브 분할 수.
+   *
+   * 경로는 직선의 연속이라 코너마다 몇 분할이면 형태가 충분히 나온다. 점 개수에
+   * 큰 계수를 곱하면 지옥(경로점 300개)에서 5천 분할까지 치솟아, 재생을 누르는
+   * 순간 8명분 지오메트리를 만드느라 화면이 끊긴다. 상한을 둔다.
+   *
+   * 진행 표시는 uv.x를 분할 인덱스에 대응시키므로, 7초에 1200분할이면 한 프레임에
+   * 세 칸씩 나아간다 — 눈으로는 이어져 보인다.
+   */
   const geometry = useMemo(
-    () => new TubeGeometry(curve, Math.max(180, points.length * 18), radius, 7, false),
+    () => new TubeGeometry(curve, clamp(points.length * 5, 200, 1600), radius, 7, false),
     [curve, points.length, radius],
   )
 
