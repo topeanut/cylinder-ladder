@@ -3,7 +3,7 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { CurvePath, LineCurve3, Vector3 } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { CYLINDER_HEIGHT } from '../lib/geometry'
-import type { Lane } from '../lib/trail'
+import { playEase, type Lane } from '../lib/trail'
 import { clamp } from '../lib/utils'
 
 /**
@@ -24,6 +24,14 @@ const EYE_LIFT = 0.55
 /** 목표 지점을 향해 매 프레임 좁히는 비율. 낮을수록 부드럽고 늦게 따라온다. */
 const FOLLOW_EASE = 0.06
 const RETURN_EASE = 0.035
+/** 막판에 카메라가 파고드는 정도. 0.62면 거리를 62%까지 좁힌다. */
+const CLIMAX_ZOOM = 0.62
+
+/** 두 경계 사이를 0에서 1로 부드럽게 잇는다. */
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = clamp((x - edge0) / (edge1 - edge0), 0, 1)
+  return t * t * (3 - 2 * t)
+}
 
 interface CinematicCameraProps {
   active: boolean
@@ -118,10 +126,16 @@ export function CinematicCamera({
     if (handedOver.current) return
 
     elapsedRef.current += delta * 1000
-    const t = clamp((elapsedRef.current - lane.delayMs) / Math.max(lane.durationMs, 1), 0, 1)
-    if (t <= 0) return
+    const raw = clamp((elapsedRef.current - lane.delayMs) / Math.max(lane.durationMs, 1), 0, 1)
+    if (raw <= 0) return
 
+    // 트레일과 같은 곡선을 써야 카메라가 선두를 정확히 따라간다.
+    const t = playEase(raw)
     curve.getPointAt(t, head)
+
+    // 막판 슬로모션 구간에서 카메라가 결과 칸 쪽으로 파고든다.
+    const closeIn = 1 - (1 - CLIMAX_ZOOM) * smoothstep(0.78, 1, raw)
+    const reach = distance.current * closeIn
 
     // 목표: 머리 높이를 보되, 시선은 원기둥 중심축에 둔다.
     const targetY = clamp(head.y, -CYLINDER_HEIGHT / 2, CYLINDER_HEIGHT / 2)
@@ -130,19 +144,11 @@ export function CinematicCamera({
     // 한 사람을 쫓을 때만 그 사람이 있는 방향으로 카메라를 옮긴다.
     if (activeIndex !== null) {
       const azimuth = Math.atan2(head.x, head.z)
-      desired.set(
-        Math.sin(azimuth) * distance.current,
-        targetY + EYE_LIFT,
-        Math.cos(azimuth) * distance.current,
-      )
+      desired.set(Math.sin(azimuth) * reach, targetY + EYE_LIFT, Math.cos(azimuth) * reach)
     } else {
       // 전원 재생: 높이만 따라가고 방위는 지금 보고 있는 쪽을 유지한다.
       const azimuth = Math.atan2(camera.position.x, camera.position.z)
-      desired.set(
-        Math.sin(azimuth) * distance.current,
-        targetY + EYE_LIFT,
-        Math.cos(azimuth) * distance.current,
-      )
+      desired.set(Math.sin(azimuth) * reach, targetY + EYE_LIFT, Math.cos(azimuth) * reach)
     }
 
     camera.position.lerp(desired, FOLLOW_EASE)

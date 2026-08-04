@@ -1,5 +1,6 @@
-import { Suspense, useRef } from 'react'
-import { Canvas, useFrame } from '@react-three/fiber'
+import { Suspense, useEffect, useRef } from 'react'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { Environment, Lightformer, OrbitControls, Sky } from '@react-three/drei'
 import { Bloom, EffectComposer, Vignette } from '@react-three/postprocessing'
 import type { Difficulty } from '../lib/types'
@@ -72,6 +73,8 @@ const THEMES: Record<
 
 interface LadderSceneProps extends LadderRigProps {
   difficulty: Difficulty
+  /** 값이 바뀔 때마다 카메라가 원기둥 안팎으로 이동한다. */
+  insideToken: number
   /** 애니메이션이 도는 동안에는 자동 회전을 멈춰 눈이 따라가기 쉽게 한다. */
   running: boolean
   onPlayEnd: () => void
@@ -83,6 +86,7 @@ interface LadderSceneProps extends LadderRigProps {
 
 export function LadderScene({
   difficulty,
+  insideToken,
   running,
   onPlayEnd,
   playDurationMs,
@@ -168,6 +172,11 @@ export function LadderScene({
           reverse={rig.reverse}
         />
 
+        {/* 안에서는 밖의 빛이 닿지 않으므로 중심에 등 하나를 켠다 */}
+        {rig.inside && <pointLight position={[0, 0, 0]} intensity={12} distance={9} />}
+
+        <CameraDock inside={rig.inside} token={insideToken} />
+
         <Ground difficulty={difficulty} />
         <Motes difficulty={difficulty} />
       </Suspense>
@@ -175,12 +184,13 @@ export function LadderScene({
       <OrbitControls
         makeDefault
         enablePan={false}
-        minDistance={5.5}
+        // 안에서 보기를 위해 축 가까이까지 들어갈 수 있어야 한다.
+        minDistance={0.4}
         maxDistance={18}
         minPolarAngle={Math.PI * 0.18}
         maxPolarAngle={Math.PI * 0.72}
         autoRotate={rig.people.length === 0 || (!rig.instant && !running)}
-        autoRotateSpeed={0.55}
+        autoRotateSpeed={rig.inside ? 1.4 : 0.55}
         enableDamping
         dampingFactor={0.08}
       />
@@ -233,6 +243,43 @@ function PlayClock({
       firedRef.current = true
       onEndRef.current()
     }
+  })
+
+  return null
+}
+
+/**
+ * 안에서 보기 / 밖에서 보기 전환.
+ *
+ * 카메라를 순간이동시키면 어디로 갔는지 알 수 없다. 지금 보고 있는 방위를 유지한
+ * 채 축까지의 거리만 좁히거나 벌리면, 원기둥 껍질을 통과해 들어가는 것처럼 보인다.
+ */
+function CameraDock({ inside, token }: { inside: boolean; token: number }) {
+  const camera = useThree((state) => state.camera)
+  const controls = useThree((state) => state.controls) as OrbitControlsImpl | null
+
+  const goal = useRef<number | null>(null)
+
+  // 토큰이 바뀔 때만 목표 거리를 새로 잡는다. 그 뒤에는 사용자가 휠로 자유롭게 조절한다.
+  useEffect(() => {
+    if (token === 0) return
+    goal.current = inside ? 0.9 : 11.2
+  }, [inside, token])
+
+  useFrame(() => {
+    if (goal.current === null || !controls) return
+
+    const axis = Math.hypot(camera.position.x, camera.position.z) || 0.0001
+    const next = axis + (goal.current - axis) * 0.12
+
+    if (Math.abs(next - goal.current) < 0.02) goal.current = null
+
+    const scale = next / axis
+    camera.position.x *= scale
+    camera.position.z *= scale
+    camera.position.y += (0 - camera.position.y) * 0.12
+    controls.target.set(0, 0, 0)
+    controls.update()
   })
 
   return null

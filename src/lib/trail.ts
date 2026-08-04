@@ -15,6 +15,27 @@ const PERSON_STAGGER_MS = 130
 /** 트레일이 세로줄보다 얼마나 바깥에 떠 있는가. */
 const TRAIL_LIFT = 0.05
 
+/** 이 지점까지는 균일한 속도로 내려간다. 남은 구간이 슬로모션이 된다. */
+const SLOWDOWN_KNEE = 0.8
+/** 균일 구간이 담당하는 경로 비율. 나머지 10%를 남은 20% 시간에 천천히 간다. */
+const SLOWDOWN_REACH = 0.9
+
+/**
+ * 재생 진행률을 경로 진행률로 바꾼다.
+ *
+ * 7초 내내 같은 속도면 클라이맥스가 없다. 80%까지는 균일하게 내려가다가,
+ * 남은 20% 시간 동안 마지막 10% 구간만 천천히 짚는다. 결과 칸에 닿기 직전이
+ * 눈에 띄게 느려지는 이유다. 도착 시각(t=1)은 그대로라 전체 길이는 변하지 않는다.
+ */
+export function playEase(t: number): number {
+  if (t <= 0) return 0
+  if (t >= 1) return 1
+  if (t < SLOWDOWN_KNEE) return (t / SLOWDOWN_KNEE) * SLOWDOWN_REACH
+
+  const tail = (t - SLOWDOWN_KNEE) / (1 - SLOWDOWN_KNEE)
+  return SLOWDOWN_REACH + (1 - SLOWDOWN_REACH) * (1 - Math.pow(1 - tail, 2.4))
+}
+
 export interface Lane {
   personIndex: number
   points: Vector3[]

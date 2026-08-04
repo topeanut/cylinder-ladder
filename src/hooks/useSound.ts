@@ -114,6 +114,30 @@ export function useSound() {
     [getContext, tone],
   )
 
+  /**
+   * 결과 칸에 닿는 순간 울리는, 사람마다 다른 음.
+   *
+   * 5음 음계(펜타토닉)로 배정한다. 온음계를 쓰면 인원이 늘수록 반음이 부딪혀
+   * 불협이 생기는데, 펜타토닉은 어떤 조합을 동시에 눌러도 협화한다. 도착 시각이
+   * 조금씩 어긋나 아르페지오처럼 들리고, 마지막엔 화음으로 겹친다.
+   */
+  const playArrival = useCallback(
+    (index: number) => {
+      const ctx = getContext()
+      if (!ctx) return
+
+      const PENTATONIC = [0, 2, 4, 7, 9]
+      // 다섯 명을 넘어가면 한 옥타브씩 올려 계속 이어 붙인다.
+      const note = 60 + PENTATONIC[index % 5] + 12 * Math.floor(index / 5)
+      const now = ctx.currentTime
+
+      tone(ctx, midi(note), now, 0.55, 0.085, 'sine')
+      // 한 옥타브 위를 옅게 얹으면 종소리처럼 또렷해진다.
+      tone(ctx, midi(note + 12), now, 0.35, 0.03, 'triangle')
+    },
+    [getContext, tone],
+  )
+
   /** 사다리를 타고 내려가는 동안 흐르는 낮은 발소리. */
   const playStep = useCallback(() => {
     const ctx = getContext()
@@ -192,7 +216,16 @@ export function useSound() {
     }
   }, [])
 
-  return { muted, toggleMuted, playClack, playStep, playWin, startBgm, stopBgm }
+  return {
+    muted,
+    toggleMuted,
+    playClack,
+    playStep,
+    playArrival,
+    playWin,
+    startBgm,
+    stopBgm,
+  }
 }
 
 declare global {

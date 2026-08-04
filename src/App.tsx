@@ -18,7 +18,8 @@ import { LadderScene } from './three/LadderScene'
 
 export default function App() {
   const app = useAppState()
-  const { muted, toggleMuted, playClack, playWin, startBgm, stopBgm } = useSound()
+  const { muted, toggleMuted, playClack, playArrival, playWin, startBgm, stopBgm } =
+    useSound()
   const fireConfetti = useConfetti()
 
   const [running, setRunning] = useState(false)
@@ -39,6 +40,9 @@ export default function App() {
   const [sceneReady, setSceneReady] = useState(false)
   /** 당첨 배너를 다시 띄우는 토큰. */
   const [bannerToken, setBannerToken] = useState(0)
+  /** 카메라가 원기둥 안에 있는지. 토큰이 바뀔 때만 카메라가 이동한다. */
+  const [inside, setInside] = useState(false)
+  const [insideToken, setInsideToken] = useState(0)
   /** 거꾸로 타서 주인을 찾아냈을 때 띄우는 모달. null이면 닫힌 상태. */
   const [personResult, setPersonResult] = useState<
     { name: string; index: number; isWin: boolean } | null
@@ -117,6 +121,24 @@ export default function App() {
     startBgm()
     return () => stopBgm()
   }, [running, startBgm, stopBgm])
+
+  /* ── 각자 도착하는 순간의 음 ──────────────────────────────── */
+
+  useEffect(() => {
+    if (!running || lanes.length === 0) return
+
+    // 도착 시각이 130ms씩 어긋나 아르페지오처럼 들린다.
+    const visible =
+      activeIndex === null ? lanes : lanes.filter((l) => l.personIndex === activeIndex)
+
+    const timers = visible.map((lane) =>
+      window.setTimeout(
+        () => playArrival(lane.personIndex),
+        lane.delayMs + lane.durationMs,
+      ),
+    )
+    return () => timers.forEach(window.clearTimeout)
+  }, [running, lanes, activeIndex, playArrival])
 
   /* ── 동작 ─────────────────────────────────────────────────── */
 
@@ -299,6 +321,8 @@ export default function App() {
       <main className="absolute inset-0 min-[900px]:relative min-[900px]:h-svh min-[900px]:flex-1">
         <LadderScene
           difficulty={app.difficulty}
+          inside={inside}
+          insideToken={insideToken}
           running={running}
           playDurationMs={playDurationMs}
           onPlayEnd={handlePlayEnd}
@@ -321,6 +345,19 @@ export default function App() {
           <div className="absolute inset-0 flex items-center justify-center bg-neutral-950">
             <span className="size-8 animate-spin rounded-full border-2 border-neutral-700 border-t-amber-500" />
           </div>
+        )}
+
+        {app.people.length > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              setInside((value) => !value)
+              setInsideToken((token) => token + 1)
+            }}
+            className="absolute top-3 right-3 z-10 rounded-xl border border-neutral-700 bg-neutral-950/80 px-3 py-2 text-xs font-bold text-neutral-200 backdrop-blur transition-colors hover:border-amber-500 hover:text-amber-400"
+          >
+            {inside ? '밖에서 보기' : '원기둥 안에서 보기'}
+          </button>
         )}
 
         <WinnerBanner winners={winnerNames} token={bannerToken} />

@@ -18,7 +18,7 @@ import {
 import type { LadderPlan } from '../lib/ladder'
 import type { Person } from '../lib/types'
 import { CYLINDER_HEIGHT, personColor, rungDelayMs, type LadderGeometry } from '../lib/geometry'
-import type { Lane } from '../lib/trail'
+import { playEase, type Lane } from '../lib/trail'
 import { clamp, cn, mod } from '../lib/utils'
 
 const RUNG_FLY_MS = 620
@@ -49,6 +49,8 @@ export interface LadderRigProps {
   reverse: boolean
   /** 애니메이션 없이 최종 상태로 그린다(공유 링크로 바로 들어온 경우). */
   instant: boolean
+  /** 카메라가 원기둥 안에 있는지. 안에서는 바깥면에 붙은 이름표가 보이지 않는다. */
+  inside: boolean
   onSelectPerson: (index: number) => void
   /** 결과 칸을 눌렀을 때. 거꾸로 타기의 출발점이 된다. */
   onSelectSlot: (slotIndex: number) => void
@@ -64,6 +66,7 @@ function LadderRigImpl({
   activeIndex,
   reverse,
   instant,
+  inside,
   onSelectPerson,
   onSelectSlot,
 }: LadderRigProps) {
@@ -148,8 +151,12 @@ function LadderRigImpl({
         </Fragment>
       )}
 
-      {/* 이름표 */}
-      {people.map((person, index) => (
+      {/*
+        이름표와 결과표는 원기둥 바깥면에 붙어 있다. 카메라가 안으로 들어가면
+        뒷면만 보이므로 아예 감춘다. 안에서는 구조 자체가 볼거리다.
+      */}
+      {!inside &&
+        people.map((person, index) => (
         <FacingLabel
           key={person.id}
           azimuth={geo.azimuth(index)}
@@ -169,7 +176,7 @@ function LadderRigImpl({
             <span className="truncate">{person.name}</span>
           </button>
         </FacingLabel>
-      ))}
+        ))}
 
       {/*
         결과 칸은 처음부터 전부 보인다.
@@ -178,6 +185,7 @@ function LadderRigImpl({
         멀리서도 보이게 빛낸다.
       */}
       {plan &&
+        !inside &&
         plan.prizeSlots.map((isWin, index) => (
           <Fragment key={index}>
             {isWin && <PrizeBeacon position={geo.railPoint(index, -top - 0.12)} />}
@@ -495,7 +503,9 @@ function Trail({
 
   useFrame((_, delta) => {
     elapsedRef.current += delta * 1000
-    const t = instant ? 1 : clamp((elapsedRef.current - delayMs) / Math.max(durationMs, 1), 0, 1)
+    const raw = instant ? 1 : clamp((elapsedRef.current - delayMs) / Math.max(durationMs, 1), 0, 1)
+    // 결과 칸에 닿기 직전이 눈에 띄게 느려진다.
+    const t = playEase(raw)
     material.uniforms.uProgress.value = t
 
     // 선두의 발광 구슬. 다 내려가면 치운다.
