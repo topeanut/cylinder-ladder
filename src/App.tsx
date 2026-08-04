@@ -3,6 +3,7 @@ import { Controls } from './components/Controls'
 import { MathNotes } from './components/MathNotes'
 import { MobileBar } from './components/MobileBar'
 import { PeopleEditor } from './components/PeopleEditor'
+import { PersonResultDialog } from './components/PersonResultDialog'
 import { ResultBoard } from './components/ResultBoard'
 import { Sidebar } from './components/Sidebar'
 import { WinnerBanner } from './components/WinnerBanner'
@@ -38,6 +39,10 @@ export default function App() {
   const [sceneReady, setSceneReady] = useState(false)
   /** 당첨 배너를 다시 띄우는 토큰. */
   const [bannerToken, setBannerToken] = useState(0)
+  /** 거꾸로 타서 주인을 찾아냈을 때 띄우는 모달. null이면 닫힌 상태. */
+  const [personResult, setPersonResult] = useState<
+    { name: string; index: number; isWin: boolean } | null
+  >(null)
 
   /**
    * 공유 링크로 막 들어온 경우에는 애니메이션 없이 최종 상태를 보여 준다.
@@ -121,6 +126,7 @@ export default function App() {
     setReverse(false)
     setPlayToken(0)
     setRevealedPeople(new Set())
+    setPersonResult(null)
     app.rollLadder()
   }, [app])
 
@@ -129,6 +135,7 @@ export default function App() {
     arrivedRevealed.current = false
     setActiveIndex(null)
     setReverse(false)
+    setPersonResult(null)
     setPlayToken((token) => token + 1)
     setRunning(true)
   }, [app.plan, running])
@@ -140,7 +147,15 @@ export default function App() {
     // 한 사람만 탄 경우: 그 사람의 결과만 열고, 당첨일 때만 축하한다.
     if (activeIndex !== null) {
       setRevealedPeople((prev) => new Set(prev).add(activeIndex))
-      if (app.plan.prizeSlots[app.plan.traces[activeIndex].end]) {
+      const isWin = app.plan.prizeSlots[app.plan.traces[activeIndex].end]
+
+      // 거꾸로 올라간 경우에는 "그래서 누구였는지"를 모달로 못박는다.
+      if (reverse) {
+        const name = app.people[activeIndex]?.name
+        if (name) setPersonResult({ name, index: activeIndex, isWin })
+      }
+
+      if (isWin) {
         playWin()
         fireConfetti()
       }
@@ -153,13 +168,14 @@ export default function App() {
     setBannerToken((token) => token + 1)
     playWin()
     fireConfetti()
-  }, [activeIndex, app, fireConfetti, playWin])
+  }, [activeIndex, app, fireConfetti, playWin, reverse])
 
   const handleReset = useCallback(() => {
     setActiveIndex(null)
     setReverse(false)
     setPlayToken(0)
     setRevealedPeople(new Set())
+    setPersonResult(null)
     arrivedRevealed.current = false
     app.resetLadder()
   }, [app])
@@ -192,6 +208,7 @@ export default function App() {
       const owner = app.plan.traces.findIndex((trace) => trace.end === slotIndex)
       if (owner === -1) return
 
+      setPersonResult(null)
       setActiveIndex(owner)
       setReverse(true)
       setPlayToken((token) => token + 1)
@@ -322,6 +339,8 @@ export default function App() {
             : '끌어서 돌리고, 아래 결과 칸을 누르면 주인을 거꾸로 찾아 올라갑니다'}
         </p>
       </main>
+
+      <PersonResultDialog result={personResult} onClose={() => setPersonResult(null)} />
 
       <MobileBar
         phase={phase}
