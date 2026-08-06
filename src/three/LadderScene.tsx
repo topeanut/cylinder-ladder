@@ -4,10 +4,14 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { Environment, Lightformer, OrbitControls, Sky } from '@react-three/drei'
 import { Bloom, EffectComposer, Vignette } from '@react-three/postprocessing'
 import type { Difficulty } from '../lib/types'
+import type { Lane } from '../lib/trail'
+import { clamp } from '../lib/utils'
 import { CinematicCamera } from './CinematicCamera'
 import { GhostRig } from './GhostRig'
 import { Ground } from './Ground'
 import { LadderRig, type LadderRigProps } from './LadderRig'
+import { playEase } from '../lib/trail'
+import type { PlayClock } from '../lib/playClock'
 import { Motes } from './Motes'
 
 /**
@@ -82,6 +86,8 @@ interface LadderSceneProps extends LadderRigProps {
   playDurationMs: number
   /** WebGL 컨텍스트가 준비되어 첫 프레임을 그릴 수 있게 된 순간. */
   onReady: () => void
+  /** 가로선을 건널 때 울릴 음. 경로가 곧 멜로디가 된다. */
+  onCrossRung: (personIndex: number, step: number) => void
 }
 
 export function LadderScene({
@@ -91,6 +97,7 @@ export function LadderScene({
   onPlayEnd,
   playDurationMs,
   onReady,
+  onCrossRung,
   ...rig
 }: LadderSceneProps) {
   const theme = THEMES[difficulty]
@@ -161,8 +168,22 @@ export function LadderScene({
         {/* 명단이 비었으면 실제 사다리 대신 흐릿한 원기둥이 천천히 돈다 */}
         {rig.people.length === 0 ? <GhostRig /> : <LadderRig {...rig} />}
 
-        {/* 재생이 실제로 끝났는지는 그린 프레임을 세어 판단한다 */}
-        <PlayClock active={running} durationMs={playDurationMs} onEnd={onPlayEnd} />
+        {/* 시계를 굴리는 곳은 여기 한 군데뿐. 나머지는 읽기만 한다 */}
+        <ClockDriver
+          clock={rig.clock}
+          active={running}
+          durationMs={playDurationMs}
+          onEnd={onPlayEnd}
+        />
+
+        {/* 경로가 가로선을 건널 때마다 음을 낸다 */}
+        <Melody
+          clock={rig.clock}
+          lanes={rig.lanes}
+          activeIndex={rig.activeIndex}
+          playing={running}
+          onCross={onCrossRung}
+        />
 
         {/* 재생 중에는 카메라가 선두를 따라 내려간다 */}
         <CinematicCamera
@@ -170,6 +191,7 @@ export function LadderScene({
           lanes={rig.lanes}
           activeIndex={rig.activeIndex}
           reverse={rig.reverse}
+          clock={rig.clock}
         />
 
         {/* 안에서는 밖의 빛이 닿지 않으므로 중심에 등 하나를 켠다 */}
@@ -209,39 +231,102 @@ export function LadderScene({
 }
 
 /**
- * 재생이 끝나는 시점을 알린다.
+ * 시계를 굴리고, 재생이 끝나는 시점을 알린다.
  *
  * setTimeout으로 재면 안 된다. 백그라운드 탭에서는 rAF가 멈춰 그림은 그대로인데
  * 타이머만 흘러서, 돌아왔을 때 "이미 끝났다"고 통보받는다. 프레임 델타를 쌓으면
  * 화면이 실제로 다 그려진 뒤에만 끝난다.
+ *
+ * 배속은 여기서 한 번만 곱한다. 트레일·카메라·멜로디는 이 시계를 읽기만 하므로
+ * 배속과 되감기가 저절로 따라온다.
  */
-function PlayClock({
+function ClockDriver({
+  clock,
   active,
   durationMs,
   onEnd,
 }: {
+  clock: { current: PlayClock }
   active: boolean
   durationMs: number
   onEnd: () => void
 }) {
-  const elapsedRef = useRef(0)
   const firedRef = useRef(false)
   const onEndRef = useRef(onEnd)
   onEndRef.current = onEnd
 
   useFrame((_, delta) => {
+    const state = clock.current
+    state.total = durationMs
+
     if (!active) {
-      elapsedRef.current = 0
       firedRef.current = false
       return
     }
-    if (firedRef.current) return
+    // 타임라인을 잡고 있는 동안에는 시계를 멈춘다.
+    if (state.scrubbing || firedRef.current) return
 
-    elapsedRef.current += delta * 1000
+    state.elapsed += delta * 1000 * state.speed
+
     // 마지막 한 조각이 그려질 여유를 조금 준다.
-    if (elapsedRef.current >= durationMs + 220) {
+    if (state.elapsed >= durationMs + 220) {
       firedRef.current = true
       onEndRef.current()
+    }
+  })
+
+  return null
+}
+
+/**
+ * 경로가 가로선을 건널 때마다 음을 낸다.
+ *
+ * 건너는 지점은 경로 길이 대비 위치(0~1)로 미리 계산돼 있다. 매 프레임 진행률이
+ * 그 값을 지나갔는지 보고 밀린 만큼 소리를 낸다. 시계를 되감으면 커서도 함께
+ * 되돌려, 뒤로 간 구간이 다시 울리지 않게 한다.
+ */
+function Melody({
+  clock,
+  lanes,
+  activeIndex,
+  playing,
+  onCross,
+}: {
+  clock: { current: PlayClock }
+  lanes: Lane[]
+  activeIndex: number | null
+  playing: boolean
+  onCross: (personIndex: number, step: number) => void
+}) {
+  const cursors = useRef(new Map<number, number>())
+  const onCrossRef = useRef(onCross)
+  onCrossRef.current = onCross
+
+  useFrame(() => {
+    if (!playing) {
+      cursors.current.clear()
+      return
+    }
+
+    const elapsed = clock.current.elapsed
+
+    for (const lane of lanes) {
+      if (activeIndex !== null && lane.personIndex !== activeIndex) continue
+
+      const raw = clamp((elapsed - lane.delayMs) / Math.max(lane.durationMs, 1), 0, 1)
+      const progress = playEase(raw)
+
+      let cursor = cursors.current.get(lane.personIndex) ?? 0
+
+      // 되감았다면 커서를 되돌리되 소리는 내지 않는다.
+      while (cursor > 0 && lane.crossings[cursor - 1] > progress) cursor -= 1
+
+      while (cursor < lane.crossings.length && lane.crossings[cursor] <= progress) {
+        onCrossRef.current(lane.personIndex, cursor)
+        cursor += 1
+      }
+
+      cursors.current.set(lane.personIndex, cursor)
     }
   })
 

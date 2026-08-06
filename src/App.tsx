@@ -4,6 +4,7 @@ import { MathNotes } from './components/MathNotes'
 import { MobileBar } from './components/MobileBar'
 import { PeopleEditor } from './components/PeopleEditor'
 import { PersonResultDialog } from './components/PersonResultDialog'
+import { PlaybackBar } from './components/PlaybackBar'
 import { ResultBoard } from './components/ResultBoard'
 import { Sidebar } from './components/Sidebar'
 import { WinnerBanner } from './components/WinnerBanner'
@@ -13,13 +14,29 @@ import { useSound } from './hooks/useSound'
 import { computeGeometry, rungDelayMs } from './lib/geometry'
 import { buildShareUrl } from './lib/query'
 import { buildLanes, totalPlayMs } from './lib/trail'
+import { createPlayClock, type Speed } from './lib/playClock'
 import type { Phase } from './lib/types'
 import { LadderScene } from './three/LadderScene'
 
 export default function App() {
   const app = useAppState()
-  const { muted, toggleMuted, playClack, playArrival, playWin, startBgm, stopBgm } =
-    useSound()
+  const {
+    muted,
+    toggleMuted,
+    playClack,
+    playArrival,
+    playMelodyNote,
+    playWin,
+    startBgm,
+    stopBgm,
+  } = useSound()
+
+  /**
+   * 재생 시계. 트레일·카메라·멜로디가 모두 이걸 읽는다.
+   * 매 프레임 바뀌는 값이라 state가 아니라 ref로 들고 다닌다.
+   */
+  const clock = useRef(createPlayClock())
+  const [speed, setSpeed] = useState<Speed>(1)
   const fireConfetti = useConfetti()
 
   const [running, setRunning] = useState(false)
@@ -40,6 +57,7 @@ export default function App() {
   const [sceneReady, setSceneReady] = useState(false)
   /** 당첨 배너를 다시 띄우는 토큰. */
   const [bannerToken, setBannerToken] = useState(0)
+
   /** 카메라가 원기둥 안에 있는지. 토큰이 바뀔 때만 카메라가 이동한다. */
   const [inside, setInside] = useState(false)
   const [insideToken, setInsideToken] = useState(0)
@@ -101,6 +119,11 @@ export default function App() {
     [app.revealed, app.people, revealedPeople],
   )
 
+  // 배속은 UI에서 고르고 시계가 읽는다. 렌더 중에 쓰면 부수효과가 되므로 여기서 맞춘다.
+  useEffect(() => {
+    clock.current.speed = speed
+  }, [speed])
+
   // WebGL을 못 쓰는 기기에서는 onCreated가 끝내 오지 않는다. 그런 화면을 영원히
   // 스피너로 덮어 두면 안 되므로, 일정 시간이 지나면 그냥 걷어낸다.
   useEffect(() => {
@@ -143,14 +166,15 @@ export default function App() {
     const visible =
       activeIndex === null ? lanes : lanes.filter((l) => l.personIndex === activeIndex)
 
+    // 배속을 나눠야 화면과 소리가 맞는다.
     const timers = visible.map((lane) =>
       window.setTimeout(
         () => playArrival(lane.personIndex),
-        lane.delayMs + lane.durationMs,
+        (lane.delayMs + lane.durationMs) / speed,
       ),
     )
     return () => timers.forEach(window.clearTimeout)
-  }, [running, lanes, activeIndex, playArrival])
+  }, [running, lanes, activeIndex, playArrival, speed])
 
   /* ── 동작 ─────────────────────────────────────────────────── */
 
@@ -167,6 +191,7 @@ export default function App() {
   const handlePlay = useCallback(() => {
     if (running || !app.plan) return
     arrivedRevealed.current = false
+    clock.current.elapsed = 0
     setActiveIndex(null)
     setReverse(false)
     setPersonResult(null)
@@ -220,6 +245,7 @@ export default function App() {
       if (app.seed === null || running) return
 
       const next = activeIndex === index ? null : index
+      clock.current.elapsed = 0
       setActiveIndex(next)
       setReverse(false)
       setPlayToken((token) => token + 1)
@@ -242,6 +268,7 @@ export default function App() {
       const owner = app.plan.traces.findIndex((trace) => trace.end === slotIndex)
       if (owner === -1) return
 
+      clock.current.elapsed = 0
       setPersonResult(null)
       setActiveIndex(owner)
       setReverse(true)
@@ -338,6 +365,8 @@ export default function App() {
           unfoldTarget={unfoldTarget}
           settledUnfold={settledUnfold}
           onUnfoldSettle={setSettledUnfold}
+          clock={clock}
+          onCrossRung={playMelodyNote}
           running={running}
           playDurationMs={playDurationMs}
           onPlayEnd={handlePlayEnd}
@@ -394,6 +423,17 @@ export default function App() {
             <br />
             여기에 원기둥 사다리가 세워집니다.
           </p>
+        )}
+
+        {app.plan && (playToken > 0 || app.revealed) && (
+          <div className="pointer-events-none absolute inset-x-3 bottom-24 z-10 min-[900px]:inset-x-6 min-[900px]:bottom-10">
+            <PlaybackBar
+              clock={clock}
+              speed={speed}
+              onSpeedChange={setSpeed}
+              running={running}
+            />
+          </div>
         )}
 
         <p className="pointer-events-none absolute inset-x-0 bottom-24 text-center text-xs text-neutral-500 min-[900px]:bottom-3">

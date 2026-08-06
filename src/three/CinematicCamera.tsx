@@ -4,6 +4,7 @@ import { CurvePath, LineCurve3, Vector3 } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { CYLINDER_HEIGHT } from '../lib/geometry'
 import { playEase, type Lane } from '../lib/trail'
+import type { PlayClock } from '../lib/playClock'
 import { clamp } from '../lib/utils'
 
 /**
@@ -39,6 +40,7 @@ interface CinematicCameraProps {
   activeIndex: number | null
   /** 경로를 거슬러 올라가는 중인지. 카메라도 같은 방향으로 움직여야 한다. */
   reverse: boolean
+  clock: { current: PlayClock }
 }
 
 export function CinematicCamera({
@@ -46,6 +48,7 @@ export function CinematicCamera({
   lanes,
   activeIndex,
   reverse,
+  clock,
 }: CinematicCameraProps) {
   const camera = useThree((state) => state.camera)
   const controls = useThree((state) => state.controls) as OrbitControlsImpl | null
@@ -71,7 +74,6 @@ export function CinematicCamera({
     return path.curves.length > 0 ? path : null
   }, [lane, reverse])
 
-  const elapsedRef = useRef(0)
   const head = useMemo(() => new Vector3(), [])
   const desired = useMemo(() => new Vector3(), [])
 
@@ -97,11 +99,10 @@ export function CinematicCamera({
     return () => controls.removeEventListener('start', onUserGrab)
   }, [controls])
 
-  useFrame((_, delta) => {
+  useFrame(() => {
     if (!controls) return
 
     if (!active) {
-      elapsedRef.current = 0
       wasActive.current = false
       // 재생이 끝났으면 원래 눈높이로 천천히 돌아온다.
       // 단, 사용자가 직접 잡아 둔 시점이라면 그 자리를 그대로 존중한다.
@@ -116,7 +117,6 @@ export function CinematicCamera({
 
     if (!wasActive.current) {
       wasActive.current = true
-      elapsedRef.current = 0
       // 새 재생이 시작되면 조종권을 다시 카메라가 가져온다.
       handedOver.current = false
       distance.current = clamp(camera.position.distanceTo(controls.target), 7, 13)
@@ -125,8 +125,11 @@ export function CinematicCamera({
     // 사용자가 화면을 잡았으면 더 이상 끌고 가지 않는다.
     if (handedOver.current) return
 
-    elapsedRef.current += delta * 1000
-    const raw = clamp((elapsedRef.current - lane.delayMs) / Math.max(lane.durationMs, 1), 0, 1)
+    const raw = clamp(
+      (clock.current.elapsed - lane.delayMs) / Math.max(lane.durationMs, 1),
+      0,
+      1,
+    )
     if (raw <= 0) return
 
     // 트레일과 같은 곡선을 써야 카메라가 선두를 정확히 따라간다.

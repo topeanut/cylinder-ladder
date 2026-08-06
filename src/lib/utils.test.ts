@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { appendPeople, clamp, mod, moveItem, normalizeName, parseNames } from './utils'
+import {
+  appendPeople,
+  clamp,
+  mod,
+  moveItem,
+  normalizeName,
+  parseNames,
+  splitEmoji,
+} from './utils'
 
 /**
  * 이름은 URL에서 사람을 식별하는 열쇠다. 중복이 생기거나 쉼표가 섞여 들어가면
@@ -78,5 +86,25 @@ describe('수 유틸', () => {
     expect(mod(-1, 8)).toBe(7)
     expect(mod(9, 8)).toBe(1)
     expect(mod(-9, 8)).toBe(7)
+  })
+})
+
+describe('이모지 분리', () => {
+  it('이름에 붙은 이모지를 떼어낸다', () => {
+    expect(splitEmoji('철수 🍺')).toEqual({ emoji: '🍺', label: '철수' })
+    expect(splitEmoji('🍜 영희')).toEqual({ emoji: '🍜', label: '영희' })
+  })
+
+  it('이모지가 없으면 이름을 그대로 둔다', () => {
+    expect(splitEmoji('민수')).toEqual({ emoji: '', label: '민수' })
+  })
+
+  it('이모지만 적었다면 그것을 이름으로도 쓴다', () => {
+    expect(splitEmoji('🍺').label).toBe('🍺')
+  })
+
+  it('여러 개면 첫 번째만 크게 띄운다', () => {
+    expect(splitEmoji('철수 🍺🍜').emoji).toBe('🍺')
+    expect(splitEmoji('철수 🍺🍜').label).toBe('철수')
   })
 })

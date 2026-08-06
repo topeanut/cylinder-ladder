@@ -20,7 +20,8 @@ import type { LadderPlan } from '../lib/ladder'
 import type { Person } from '../lib/types'
 import { CYLINDER_HEIGHT, personColor, rungDelayMs, type LadderGeometry } from '../lib/geometry'
 import { playEase, type Lane } from '../lib/trail'
-import { clamp, cn, mod } from '../lib/utils'
+import type { PlayClock } from '../lib/playClock'
+import { clamp, cn, mod, splitEmoji } from '../lib/utils'
 
 const RUNG_FLY_MS = 620
 const UP = new Vector3(0, 1, 0)
@@ -57,6 +58,8 @@ export interface LadderRigProps {
   /** 전개가 끝난 뒤의 배치. 트레일 도형은 이 값에서만 다시 굽는다. */
   settledUnfold: number
   onUnfoldSettle: (value: number) => void
+  /** 모두가 함께 읽는 재생 시계. 배속과 되감기가 여기 한 곳에서 결정된다. */
+  clock: { current: PlayClock }
   onSelectPerson: (index: number) => void
   /** 결과 칸을 눌렀을 때. 거꾸로 타기의 출발점이 된다. */
   onSelectSlot: (slotIndex: number) => void
@@ -76,6 +79,7 @@ function LadderRigImpl({
   unfoldTarget,
   settledUnfold,
   onUnfoldSettle,
+  clock,
   onSelectPerson,
   onSelectSlot,
 }: LadderRigProps) {
@@ -198,6 +202,7 @@ function LadderRigImpl({
                 delayMs={activeIndex === null ? lane.delayMs : 0}
                 durationMs={lane.durationMs}
                 instant={instant}
+                clock={clock}
                 // 한 사람만 볼 때는 굵게 그려 또렷하게 보이도록 한다.
                 radius={activeIndex !== null ? trailRadius * 1.5 : trailRadius}
               />
@@ -215,6 +220,7 @@ function LadderRigImpl({
       {!inside &&
         people.map((person, index) => {
           const isWin = plan?.prizeSlots[index] ?? false
+          const { emoji, label } = splitEmoji(person.name)
 
           return (
             <group key={person.id} ref={(node) => registerLabel(index, node)}>
@@ -223,14 +229,16 @@ function LadderRigImpl({
                   type="button"
                   onClick={() => onSelectPerson(index)}
                   className={cn(
-                    'flex max-w-[9rem] min-w-[4.5rem] items-center justify-center rounded-xl border-2 px-3 py-1.5',
+                    'flex max-w-[9rem] min-w-[4.5rem] items-center justify-center gap-1 rounded-xl border-2 px-3 py-1.5',
                     'bg-neutral-950/85 text-[13px] font-bold whitespace-nowrap text-neutral-50 backdrop-blur',
                     'shadow-lg transition-transform hover:scale-105',
                     activeIndex !== null && activeIndex !== index && 'opacity-40',
                   )}
                   style={{ borderColor: personColor(index) }}
                 >
-                  <span className="truncate">{person.name}</span>
+                  {/* 이모지는 크게 — 사람이 많을 때 글자보다 빨리 눈에 들어온다 */}
+                  {emoji && <span className="text-lg leading-none">{emoji}</span>}
+                  <span className="truncate">{label}</span>
                 </button>
               </FacingLabel>
 
@@ -499,6 +507,7 @@ function Trail({
   durationMs,
   instant,
   radius,
+  clock,
 }: {
   points: Vector3[]
   color: string
@@ -506,6 +515,7 @@ function Trail({
   durationMs: number
   instant: boolean
   radius: number
+  clock: { current: PlayClock }
 }) {
   /**
    * 코너를 곡선으로 잇지 않는다.
@@ -560,12 +570,11 @@ function Trail({
   }, [geometry, material])
 
   const headRef = useRef<Mesh>(null)
-  // 가로선과 같은 이유로 프레임 델타를 누적한다. (위 Rung 주석 참고)
-  const elapsedRef = useRef(0)
 
-  useFrame((_, delta) => {
-    elapsedRef.current += delta * 1000
-    const raw = instant ? 1 : clamp((elapsedRef.current - delayMs) / Math.max(durationMs, 1), 0, 1)
+  useFrame(() => {
+    // 시계는 씬이 하나만 굴린다. 여기서는 읽기만 하므로 배속·되감기가 저절로 반영된다.
+    const elapsed = clock.current.elapsed
+    const raw = instant ? 1 : clamp((elapsed - delayMs) / Math.max(durationMs, 1), 0, 1)
     // 결과 칸에 닿기 직전이 눈에 띄게 느려진다.
     const t = playEase(raw)
     material.uniforms.uProgress.value = t

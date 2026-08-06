@@ -138,6 +138,34 @@ export function useSound() {
     [getContext, tone],
   )
 
+  /**
+   * 가로선을 건널 때마다 울리는 음. 경로가 곧 멜로디가 된다.
+   *
+   * 지옥에서는 한 사람이 100번 넘게 건너므로 그대로 내면 소리가 뭉친다. 전역으로
+   * 최소 간격을 두어 초당 열여덟 음까지만 흘려보낸다. 덕분에 지옥은 촘촘한
+   * 아르페지오가 되고 쉬움은 띄엄띄엄한 선율이 된다.
+   */
+  const lastMelodyRef = useRef(0)
+  const playMelodyNote = useCallback(
+    (personIndex: number, step: number) => {
+      const ctx = getContext()
+      if (!ctx) return
+
+      const now = ctx.currentTime
+      if (now - lastMelodyRef.current < 0.055) return
+      lastMelodyRef.current = now
+
+      const PENTATONIC = [0, 2, 4, 7, 9]
+      // 사람마다 음역대를 나눠 여러 명이 겹쳐도 서로 구분된다.
+      const register = 12 * (personIndex % 3)
+      const note =
+        57 + register + PENTATONIC[step % 5] + 12 * (Math.floor(step / 5) % 2)
+
+      tone(ctx, midi(note), now, 0.18, 0.04, 'triangle')
+    },
+    [getContext, tone],
+  )
+
   /** 사다리를 타고 내려가는 동안 흐르는 낮은 발소리. */
   const playStep = useCallback(() => {
     const ctx = getContext()
@@ -221,6 +249,7 @@ export function useSound() {
     toggleMuted,
     playClack,
     playStep,
+    playMelodyNote,
     playArrival,
     playWin,
     startBgm,

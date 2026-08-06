@@ -39,6 +39,13 @@ export function playEase(t: number): number {
 export interface Lane {
   personIndex: number
   points: Vector3[]
+  /**
+   * 가로선을 건너는 순간들. 경로 전체 길이 대비 위치(0~1)다.
+   *
+   * 트레일 셰이더의 진행률과 같은 척도라, 진행률이 이 값을 지나가는 순간
+   * 소리를 내면 화면과 소리가 정확히 맞는다.
+   */
+  crossings: number[]
   delayMs: number
   durationMs: number
 }
@@ -74,20 +81,31 @@ export function buildLanes(
 
   return plan.traces.map((trace, personIndex) => {
     const points: Vector3[] = []
+    /** 가로선을 다 건넌 지점까지의 누적 길이. 나중에 전체 길이로 나눈다. */
+    const crossedAt: number[] = []
+    let length = 0
+
+    const push = (point: Vector3, isCrossing = false) => {
+      const previous = points[points.length - 1]
+      if (previous) length += point.distanceTo(previous)
+      points.push(point)
+      if (isCrossing) crossedAt.push(length)
+    }
 
     for (const segment of trace.segments) {
       if (segment.kind === 'rail') {
-        points.push(pointOn(segment.rail, geo.rowY(segment.fromRow)))
-        points.push(pointOn(segment.rail, geo.rowY(segment.toRow)))
+        push(pointOn(segment.rail, geo.rowY(segment.fromRow)))
+        push(pointOn(segment.rail, geo.rowY(segment.toRow)))
       } else {
         // 이웃으로 건너가든 원통을 관통하든, 도착한 줄의 같은 높이로 직선을 그으면 된다.
-        points.push(pointOn(segment.to, geo.rowY(segment.row)))
+        push(pointOn(segment.to, geo.rowY(segment.row)), true)
       }
     }
 
     return {
       personIndex,
       points,
+      crossings: length > 0 ? crossedAt.map((at) => at / length) : [],
       delayMs: personIndex * PERSON_STAGGER_MS,
       durationMs,
     }

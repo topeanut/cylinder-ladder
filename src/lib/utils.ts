@@ -74,3 +74,21 @@ export function randomOf<T>(items: T[]): T | undefined {
   if (items.length === 0) return undefined
   return items[Math.floor(Math.random() * items.length)]
 }
+
+/**
+ * 이름에서 이모지를 떼어낸다.
+ *
+ * `철수 🍺`처럼 적으면 3D 표지판에 이모지를 크게 띄워, 사람이 많을 때 글자보다
+ * 훨씬 빨리 구분된다. 이름 자체는 그대로 두고 표시할 때만 나눈다 — 이모지가
+ * 이름의 일부라 URL과 당첨 이력에서도 같은 사람으로 이어져야 하기 때문이다.
+ */
+export function splitEmoji(name: string): { emoji: string; label: string } {
+  // \p{Extended_Pictographic}은 그림문자 전체를 덮는다. 변이 선택자와 결합 문자까지 함께 집는다.
+  const pattern = /\p{Extended_Pictographic}(\u200D\p{Extended_Pictographic})*\uFE0F?/gu
+  const found = name.match(pattern)
+  if (!found) return { emoji: '', label: name }
+
+  const label = name.replace(pattern, '').replace(/\s+/g, ' ').trim()
+  // 이모지만 적었다면 그걸 이름으로도 쓴다.
+  return { emoji: found[0], label: label || found.join('') }
+}

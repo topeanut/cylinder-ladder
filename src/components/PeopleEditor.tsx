@@ -135,6 +135,10 @@ function PeopleEditorImpl({
 
       <div className="mt-2 flex flex-col gap-1 text-xs leading-relaxed text-neutral-400">
         <p>여러 줄을 한꺼번에 붙여넣으면 한 줄에 한 명씩 자동으로 추가됩니다.</p>
+        <p>
+          이름에 이모지를 붙이면(<span className="text-neutral-300">철수 🍺</span>) 3D
+          표지판에 크게 표시됩니다.
+        </p>
         {people.length > 0 && (
           <p>
             <span className="text-amber-500">★</span> 옆 숫자는{' '}
